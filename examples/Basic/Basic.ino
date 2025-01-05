@@ -1,5 +1,12 @@
 #include <M5Siv3D.h>
 
+// 使用例
+static constexpr int CIRCLE_RADIUS = 10;
+static int circleX = 20;
+static int directionX = 1;
+
+Font font(fonts::lgfxJapanGothicP_12);
+
 void setup() {
   System::getInstance().setBackgroundColor(Color(100, 255, 100));
 }
