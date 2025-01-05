@@ -260,6 +260,7 @@ namespace Input
         {
             // ボタンの状態を更新
             M5.update();
+            M5.Imu.update();
         }
 
     private:
@@ -295,6 +296,19 @@ namespace Input
             static IMU instance;
             return instance;
         }
+
+        /*
+         * M5AtomS3のIMU座標系:
+         * - Z軸: 画面に垂直な方向（画面裏側が正）
+         * - Y軸: デバイスの下方向が正
+         * - X軸: デバイスの左方向が正（右向きが負）
+         * 
+         * 重力加速度の値は約1G（≒9.8m/s²）
+         * 例：
+         * - デバイスを水平に置いた場合（画面上向き）: (0, 0, +1G)
+         * - デバイスを垂直に立てた場合（ケーブルが下向き）: (0, +1G, 0)
+         * - デバイスを右に傾けた場合: (-1G, 0, 0)
+         */
 
         // 加速度を取得 (G)
         Math::Vec3f getAccel() const
@@ -369,11 +383,12 @@ public:
         uint32_t currentTime = millis();
         uint32_t elapsedTime = currentTime - lastDrawTime;
 
+
         if (elapsedTime >= FRAME_INTERVAL)
         {
             // 描画終了
             endDraw();
-
+            updateTime();
             lastDrawTime = currentTime;
 
             // 残り時間をスリープ
@@ -737,17 +752,37 @@ public:
         }
     }
 
-    void draw(int32_t x, int32_t y, uint32_t transparentColor) const {
-        if (m_valid && m_canvas) {
-            m_canvas->pushSprite(&System::getInstance().getCanvas(), x, y, transparentColor);
-        }
-    }
-
     int32_t width() const { return m_width; }
     int32_t height() const { return m_height; }
     bool isEmpty() const { return !m_valid || !m_canvas; }
     Math::Vec2i size() const { return Math::Vec2i(m_width, m_height); }
 
+    void draw(int32_t x, int32_t y, float scale_x, float scale_y) const {
+        if (!m_valid || !m_canvas) return;
+        
+        // Calculate scaled dimensions
+        int32_t scaled_w = m_width * scale_x;
+        int32_t scaled_h = m_height * scale_y;
+        
+        // Create temporary canvas for scaling
+        M5Canvas temp(&M5.Display);
+        temp.createSprite(scaled_w, scaled_h);
+        
+        // Scale the image
+        temp.setPivot(0, 0);
+        temp.pushRotateZoom(0, 0, 0, scale_x, scale_y);
+        
+        // Draw the scaled image to the main canvas
+        temp.pushSprite(&System::getInstance().getCanvas(), x, y);
+        
+        // Clean up
+        temp.deleteSprite();
+    }
+
+    // Overload for uniform scaling
+    void draw(int32_t x, int32_t y, float scale) const {
+        draw(x, y, scale, scale);
+    }
 
     ~Image() {
         if (m_canvas) {
