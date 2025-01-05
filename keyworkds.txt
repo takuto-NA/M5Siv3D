@@ -1,0 +1,35 @@
+
+3. **`keywords.txt` の内容（シンタックスハイライト用）：**
+
+```txt
+# Syntax Coloring Map For M5Siv3D
+
+# Datatypes (KEYWORD1)
+M5Siv3D	KEYWORD1
+Color	KEYWORD1
+Circle	KEYWORD1
+Rect	KEYWORD1
+Triangle	KEYWORD1
+Line	KEYWORD1
+Font	KEYWORD1
+Vec2	KEYWORD1
+Vec3	KEYWORD1
+
+# Methods and Functions (KEYWORD2)
+begin	KEYWORD2
+Update	KEYWORD2
+draw	KEYWORD2
+drawFrame	KEYWORD2
+Print	KEYWORD2
+Println	KEYWORD2
+
+# Constants (LITERAL1)
+Black	LITERAL1
+White	LITERAL1
+Red	LITERAL1
+Green	LITERAL1
+Blue	LITERAL1
+Yellow	LITERAL1
+Magenta	LITERAL1
+Cyan	LITERAL1
+```
