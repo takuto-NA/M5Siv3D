@@ -17,6 +17,7 @@
 #include <M5Unified.h>
 #include <base64.hpp>  // Densaugeoのライブラリ
 #include <SPI.h>
+#include <sstream>
 
 // 数学ユーティリティを格納する名前空間
 namespace Math
@@ -235,14 +236,65 @@ struct Color
 // 色定数の追加
 namespace Palette
 {
+    // Basic colors
     const Color Black(0, 0, 0);
     const Color White(255, 255, 255);
     const Color Red(255, 0, 0);
-    const Color Green(0, 255, 0);
+    const Color Green(0, 128, 0);
     const Color Blue(0, 0, 255);
     const Color Yellow(255, 255, 0);
     const Color Magenta(255, 0, 255);
     const Color Cyan(0, 255, 255);
+
+    // Gray shades
+    const Color Dimgray(105, 105, 105);
+    const Color Gray(128, 128, 128);
+    const Color Darkgray(169, 169, 169);
+    const Color Silver(192, 192, 192);
+    const Color Lightgray(211, 211, 211);
+    const Color Gainsboro(220, 220, 220);
+    const Color Whitesmoke(245, 245, 245);
+
+    // Warm colors
+    const Color Orange(255, 165, 0);
+    const Color Darkorange(255, 140, 0);
+    const Color Coral(255, 127, 80);
+    const Color Tomato(255, 99, 71);
+    const Color Orangered(255, 69, 0);
+    const Color Crimson(220, 20, 60);
+    const Color Firebrick(178, 34, 34);
+    const Color Darkred(139, 0, 0);
+    const Color Maroon(128, 0, 0);
+
+    // Cool colors
+    const Color Navy(0, 0, 128);
+    const Color Darkblue(0, 0, 139);
+    const Color Mediumblue(0, 0, 205);
+    const Color Royalblue(65, 105, 225);
+    const Color Steelblue(70, 130, 180);
+    const Color Deepskyblue(0, 191, 255);
+    const Color Dodgerblue(30, 144, 255);
+    const Color Cornflowerblue(100, 149, 237);
+
+    // Green shades
+    const Color Darkgreen(0, 100, 0);
+    const Color Forestgreen(34, 139, 34);
+    const Color Seagreen(46, 139, 87);
+    const Color Limegreen(50, 205, 50);
+    const Color Springgreen(0, 255, 127);
+    const Color Lime(0, 255, 0);
+
+    // Purple shades
+    const Color Indigo(75, 0, 130);
+    const Color Purple(128, 0, 128);
+    const Color Darkmagenta(139, 0, 139);
+    const Color Darkviolet(148, 0, 211);
+    const Color Darkorchid(153, 50, 204);
+    const Color Blueviolet(138, 43, 226);
+
+    // Special colors
+    const Color DefaultLetterbox(1, 2, 3);
+    const Color DefaultBackground(11, 22, 33);
 }
 
 namespace Input
@@ -291,10 +343,40 @@ namespace Input
     class IMU
     {
     public:
+        // 各軸の角度計算用の構造体
+        struct EulerAngles {
+            float roll;    // X軸周りの回転（横回転）
+            float pitch;   // Y軸周りの回転（縦回転）
+            float yaw;     // Z軸周りの回転（水平回転）
+        };
+
         static IMU &getInstance()
         {
             static IMU instance;
             return instance;
+        }
+
+        // 現在の姿勢角度を取得
+        const EulerAngles& getAngles( float deltaTime)  { 
+                    // IMUの姿勢を更新
+            updateAttitude(deltaTime);
+            return m_currentAngles; }
+
+        // 姿勢を更新（毎フレーム呼び出し）
+        void updateAttitude( float deltaTime, float alpha = 0.96f, float gyroScale = 1.0f)
+        {
+            auto accel = getAccel();
+            auto gyro = getGyro();
+
+            // 加速度からの角度計算
+            float accelPitch = atan2f(-accel.x, sqrtf(accel.y * accel.y + accel.z * accel.z)) * 180.0f / M_PI;
+            float accelRoll = atan2f(accel.y, accel.z) * 180.0f / M_PI;
+            float accelYaw = atan2f(accel.x, accel.y) * 180.0f / M_PI;
+
+            // 相補フィルタを各軸に適用
+            m_currentAngles.roll = complementaryFilter(accelRoll, gyro.x, deltaTime, m_currentAngles.roll, alpha, gyroScale);
+            m_currentAngles.pitch = complementaryFilter(accelPitch, gyro.y, deltaTime, m_currentAngles.pitch, alpha, gyroScale);
+            m_currentAngles.yaw = complementaryFilter(accelYaw, gyro.z, deltaTime, m_currentAngles.yaw, alpha, gyroScale);
         }
 
         /*
@@ -332,11 +414,25 @@ namespace Input
         }
 
         // ... rest of IMU implementation ...
+
+    private:
+        IMU() : m_currentAngles{0.0f, 0.0f, 0.0f} {}
+
+        // 相補フィルタのヘルパー関数
+        float complementaryFilter(float accelAngle, float gyroRate, float deltaTime, float currentAngle, 
+                                float alpha, float gyroScale) const {
+            float gyroAngle = currentAngle + gyroRate * gyroScale * deltaTime;
+            return alpha * gyroAngle + (1.0f - alpha) * accelAngle;
+        }
+
+        EulerAngles m_currentAngles;  // 現在の姿勢角度
     };
 
     // グローバルなIMUインスタンス
     inline IMU &IMU = IMU::getInstance();
 }
+
+
 
 class System
 {
@@ -426,9 +522,9 @@ public:
     }
 
 private:
+
     System()
     {
-
         begin();
     } // プライベートコンストラクタ
 
@@ -463,16 +559,56 @@ private:
     }
 };
 
-// Print関数を名前空間内に移動
-void Print(const std::string &text)
-{
-    System::getInstance().getCanvas().print(text.c_str());
+
+class PrintManager {
+private:
+    std::stringstream m_buffer;
+    int32_t m_cursorX = 0;
+    int32_t m_cursorY = 0;
+
+public:
+    static PrintManager& getInstance() {
+        static PrintManager instance;
+        return instance;
+    }
+
+    template <typename T>
+    PrintManager& operator<<(const T& value) {
+        m_buffer << value << '\n';  // 常に改行を追加
+        return *this;
+    }
+
+    void clear() {
+        m_buffer.str("");
+        m_buffer.clear();
+        m_cursorX = 0;
+        m_cursorY = 0;
+    }
+
+    void draw() {
+        if (m_buffer.str().empty()) return;
+
+        auto& canvas = System::getInstance().getCanvas();
+        canvas.setCursor(m_cursorX, m_cursorY);
+        canvas.print(m_buffer.str().c_str());
+    }
+
+private:
+    PrintManager() = default;
+};
+
+// グローバル関数として定義
+inline PrintManager& Print = PrintManager::getInstance();
+
+inline void ClearPrint() {
+    Print.clear();
 }
 
-void Println(const std::string &text)
-{
-    System::getInstance().getCanvas().println(text.c_str());
+// システムのendDraw()内で呼び出すための描画関数
+inline void drawPrint() {
+    Print.draw();
 }
+
 
 struct Circle
 {
@@ -480,7 +616,22 @@ struct Circle
     int32_t m_y;
     int32_t m_r;
 
+    // 既存のコンストラクタ
     Circle(int32_t x, int32_t y, int32_t r) : m_x(x), m_y(y), m_r(r)
+    {
+    }
+
+    // Vec2iを使用するコンストラクタ
+    Circle(const Math::Vec2i& center, int32_t r)
+        : m_x(center.x), m_y(center.y), m_r(r)
+    {
+    }
+
+    // Vec2fを使用するコンストラクタ
+    Circle(const Math::Vec2f& center, int32_t r)
+        : m_x(static_cast<int32_t>(center.x)), 
+          m_y(static_cast<int32_t>(center.y)), 
+          m_r(r)
     {
     }
 
@@ -512,10 +663,44 @@ struct Rect
     int32_t m_width;
     int32_t m_height;
 
-    Rect(int32_t x, int32_t y, int32_t width, int32_t height) : m_x(x), m_y(y), m_width(width), m_height(height)
+    // 既存のコンストラクタ
+    Rect(int32_t x, int32_t y, int32_t width, int32_t height) 
+        : m_x(x), m_y(y), m_width(width), m_height(height)
     {
     }
 
+    // Vec2iを使用するコンストラクタ（位置とサイズ）
+    Rect(const Math::Vec2i& pos, const Math::Vec2i& size)
+        : m_x(pos.x), m_y(pos.y), 
+          m_width(size.x), m_height(size.y)
+    {
+    }
+
+    // Vec2fを使用するコンストラクタ（位置とサイズ）
+    Rect(const Math::Vec2f& pos, const Math::Vec2f& size)
+        : m_x(static_cast<int32_t>(pos.x)), 
+          m_y(static_cast<int32_t>(pos.y)),
+          m_width(static_cast<int32_t>(size.x)), 
+          m_height(static_cast<int32_t>(size.y))
+    {
+    }
+
+    // Vec2iを位置指定に使用するコンストラクタ
+    Rect(const Math::Vec2i& pos, int32_t width, int32_t height)
+        : m_x(pos.x), m_y(pos.y), 
+          m_width(width), m_height(height)
+    {
+    }
+
+    // Vec2fを位置指定に使用するコンストラクタ
+    Rect(const Math::Vec2f& pos, int32_t width, int32_t height)
+        : m_x(static_cast<int32_t>(pos.x)), 
+          m_y(static_cast<int32_t>(pos.y)),
+          m_width(width), m_height(height)
+    {
+    }
+
+    // 既存のメソッド
     void draw(const Color &color = Color(0, 0, 0))
     {
         System::getInstance().getCanvas().fillRect(m_x, m_y, m_width, m_height, color.toRGB565());
@@ -525,13 +710,41 @@ struct Rect
     {
         System::getInstance().getCanvas().drawRect(m_x, m_y, m_width, m_height, color.toRGB565());
     }
+
+    void drawRoundFrame(int32_t radius, const Color &color = Color(0, 0, 0))
+    {
+        System::getInstance().getCanvas().drawRoundRect(m_x, m_y, m_width, m_height, radius, color.toRGB565());
+    }
+
+    void drawRound(int32_t radius, const Color &color = Color(0, 0, 0))
+    {
+        System::getInstance().getCanvas().fillRoundRect(m_x, m_y, m_width, m_height, radius, color.toRGB565());
+    }
 };
 
 struct Triangle
 {
     int32_t m_x1, m_y1, m_x2, m_y2, m_x3, m_y3;
 
-    Triangle(int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t x3, int32_t y3) : m_x1(x1), m_y1(y1), m_x2(x2), m_y2(y2), m_x3(x3), m_y3(y3)
+    // 既存のコンストラクタ
+    Triangle(int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t x3, int32_t y3) 
+        : m_x1(x1), m_y1(y1), m_x2(x2), m_y2(y2), m_x3(x3), m_y3(y3)
+    {
+    }
+
+    // Vec2iを使用するコンストラクタ
+    Triangle(const Math::Vec2i& p1, const Math::Vec2i& p2, const Math::Vec2i& p3)
+        : m_x1(p1.x), m_y1(p1.y), 
+          m_x2(p2.x), m_y2(p2.y), 
+          m_x3(p3.x), m_y3(p3.y)
+    {
+    }
+
+    // Vec2fを使用するコンストラクタ
+    Triangle(const Math::Vec2f& p1, const Math::Vec2f& p2, const Math::Vec2f& p3)
+        : m_x1(static_cast<int32_t>(p1.x)), m_y1(static_cast<int32_t>(p1.y)),
+          m_x2(static_cast<int32_t>(p2.x)), m_y2(static_cast<int32_t>(p2.y)),
+          m_x3(static_cast<int32_t>(p3.x)), m_y3(static_cast<int32_t>(p3.y))
     {
     }
 
@@ -550,7 +763,24 @@ struct Line
 {
     int32_t m_x1, m_y1, m_x2, m_y2;
 
-    Line(int32_t x1, int32_t y1, int32_t x2, int32_t y2) : m_x1(x1), m_y1(y1), m_x2(x2), m_y2(y2)
+    // 既存のコンストラクタ
+    Line(int32_t x1, int32_t y1, int32_t x2, int32_t y2) 
+        : m_x1(x1), m_y1(y1), m_x2(x2), m_y2(y2)
+    {
+    }
+
+    // Vec2を使用するコンストラクタ
+    Line(const Math::Vec2i& from, const Math::Vec2i& to)
+        : m_x1(from.x), m_y1(from.y), m_x2(to.x), m_y2(to.y)
+    {
+    }
+
+    // Vec2fからの変換コンストラクタ
+    Line(const Math::Vec2f& from, const Math::Vec2f& to)
+        : m_x1(static_cast<int32_t>(from.x)), 
+          m_y1(static_cast<int32_t>(from.y)),
+          m_x2(static_cast<int32_t>(to.x)), 
+          m_y2(static_cast<int32_t>(to.y))
     {
     }
 
@@ -647,6 +877,59 @@ struct Font
     }
 };
 
+struct Bezier
+{
+    // 3点ベジェ曲線用の構造体
+    struct Bezier3
+    {
+        int32_t x0, y0;  // 開始点
+        int32_t x1, y1;  // 制御点
+        int32_t x2, y2;  // 終了点
+
+        Bezier3(int32_t _x0, int32_t _y0, int32_t _x1, int32_t _y1, int32_t _x2, int32_t _y2)
+            : x0(_x0), y0(_y0), x1(_x1), y1(_y1), x2(_x2), y2(_y2)
+        {
+        }
+
+        void draw(const Color &color = Color(0, 0, 0))
+        {
+            System::getInstance().getCanvas().drawBezier(x0, y0, x1, y1, x2, y2, color.toRGB565());
+        }
+    };
+
+    // 4点ベジェ曲線用の構造体
+    struct Bezier4
+    {
+        int32_t x0, y0;  // 開始点
+        int32_t x1, y1;  // 制御点1
+        int32_t x2, y2;  // 制御点2
+        int32_t x3, y3;  // 終了点
+
+        Bezier4(int32_t _x0, int32_t _y0, int32_t _x1, int32_t _y1, 
+                int32_t _x2, int32_t _y2, int32_t _x3, int32_t _y3)
+            : x0(_x0), y0(_y0), x1(_x1), y1(_y1), x2(_x2), y2(_y2), x3(_x3), y3(_y3)
+        {
+        }
+
+        void draw(const Color &color = Color(0, 0, 0))
+        {
+            System::getInstance().getCanvas().drawBezier(x0, y0, x1, y1, x2, y2, x3, y3, color.toRGB565());
+        }
+    };
+
+    // ファクトリーメソッド
+    static Bezier3 create3Point(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2)
+    {
+        return Bezier3(x0, y0, x1, y1, x2, y2);
+    }
+
+    static Bezier4 create4Point(int32_t x0, int32_t y0, int32_t x1, int32_t y1, 
+                               int32_t x2, int32_t y2, int32_t x3, int32_t y3)
+    {
+        return Bezier4(x0, y0, x1, y1, x2, y2, x3, y3);
+    }
+};
+
 class Image {
 private:
     M5Canvas* m_canvas;
@@ -723,7 +1006,7 @@ public:
         return true;
     }
 
-    bool create(int32_t width, int32_t height) {
+    bool create(int32_t width, int32_t height, const Color& backgroundColor = Palette::Black) {
         if (!m_canvas) {
             Serial.println("Canvas not initialized");
             return false;
@@ -741,7 +1024,7 @@ public:
 
         m_width = width;
         m_height = height;
-        m_canvas->fillScreen(TFT_BLACK);
+        m_canvas->fillSprite(backgroundColor.toRGB565());  
         m_valid = true;
         return true;
     }
