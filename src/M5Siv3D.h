@@ -674,6 +674,11 @@ public:
         canvas.pushSprite(0, 0);
     }
 
+    static void SetBackgroundColor(const Color &color)
+    {
+        getInstance().setBackgroundColor(color);
+    }
+
     void setBackgroundColor(const Color &color)
     {
         m_backgroundColor = color;
@@ -718,18 +723,49 @@ public:
     }
 
     // 画面の幅と高さの取得
+    static int Width()
+    {
+        return getInstance().getWidth();
+    }
+
+    static int Height()
+    {
+        return getInstance().getHeight();
+    }
+
     int getWidth() const { return M5.Display.width(); }
     int getHeight() const { return M5.Display.height(); }
 
     // 時間管理関連のメソッドを追加
+
+    static float DeltaTime()
+    {
+        return getInstance().getDeltaTime();
+    }
+
+    static float FPS()
+    {
+        return getInstance().getFPS();
+    }
+
+    static uint64_t FrameCount()
+    {
+        return getInstance().getFrameCount();
+    }
+
     float getDeltaTime() const { return m_deltaTime; }
     float getFPS() const { return 1000.0f / m_averageFrameTime; }
     uint64_t getFrameCount() const { return m_frameCount; }
 
     // 経過時間を秒単位で取得
-    double getTime() const
+    double getElapsedTimeS() const
     {
         return millis() / 1000.0;
+    }
+
+    double getElapsedTimeMS() const
+    {
+        return millis();
     }
 
 private:
@@ -864,6 +900,38 @@ struct Circle
     {
         System::getInstance().getCanvas().fillArc(m_x, m_y, m_r, thickness, startAngle, endAngle, color.toRGB565());
     }
+
+    // 点が円内にあるかどうかをチェック
+    bool contains(const Math::Vec2i& point) const
+    {
+        int32_t dx = point.x - m_x;
+        int32_t dy = point.y - m_y;
+        return (dx * dx + dy * dy) <= (m_r * m_r);
+    }
+
+    // タッチ位置が円内にあるかどうか
+    bool touchOver() const
+    {
+        return contains(Input::Touch.pos());
+    }
+
+    // タッチが開始されたかどうか
+    bool touched() const
+    {
+        return Input::Touch.down() && contains(Input::Touch.pos());
+    }
+
+    // タッチが離されたかどうか
+    bool released() const
+    {
+        return Input::Touch.up() && contains(Input::Touch.pos());
+    }
+
+    // 継続的なタッチ判定
+    bool pressed() const
+    {
+        return Input::Touch.pressed() && contains(Input::Touch.pos());
+    }
 };
 
 struct Rect
@@ -930,6 +998,37 @@ struct Rect
     {
         System::getInstance().getCanvas().fillRoundRect(m_x, m_y, m_width, m_height, radius, color.toRGB565());
     }
+
+    // 点が矩形内にあるかどうかをチェック
+    bool contains(const Math::Vec2i& point) const
+    {
+        return point.x >= m_x && point.x < (m_x + m_width) &&
+               point.y >= m_y && point.y < (m_y + m_height);
+    }
+
+    // タッチ位置が矩形内にあるかどうか
+    bool touchOver() const
+    {
+        return contains(Input::Touch.pos());
+    }
+
+    // タッチが開始されたかどうか
+    bool touched() const
+    {
+        return Input::Touch.down() && contains(Input::Touch.pos());
+    }
+
+    // タッチが離されたかどうか
+    bool released() const
+    {
+        return Input::Touch.up() && contains(Input::Touch.pos());
+    }
+
+    // 継続的なタッチ判定
+    bool pressed() const
+    {
+        return Input::Touch.pressed() && contains(Input::Touch.pos());
+    }
 };
 
 struct Triangle
@@ -966,6 +1065,50 @@ struct Triangle
     void drawFrame(const Color &color = Color(0, 0, 0))
     {
         System::getInstance().getCanvas().drawTriangle(m_x1, m_y1, m_x2, m_y2, m_x3, m_y3, color.toRGB565());
+    }
+
+    // 点が三角形内にあるかどうかをチェック
+    bool contains(const Math::Vec2i& point) const
+    {
+        // 三角形の面積を計算する関数
+        auto area = [](int32_t x1, int32_t y1, int32_t x2, int32_t y2, int32_t x3, int32_t y3) {
+            return abs((x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)) / 2.0f);
+        };
+
+        // 全体の三角形の面積
+        float A = area(m_x1, m_y1, m_x2, m_y2, m_x3, m_y3);
+
+        // 点Pと各頂点で作られる3つの三角形の面積
+        float A1 = area(point.x, point.y, m_x2, m_y2, m_x3, m_y3);
+        float A2 = area(m_x1, m_y1, point.x, point.y, m_x3, m_y3);
+        float A3 = area(m_x1, m_y1, m_x2, m_y2, point.x, point.y);
+
+        // 面積の合計が元の三角形とほぼ同じなら内部にある
+        return abs(A - (A1 + A2 + A3)) < 0.1f;
+    }
+
+    // タッチ位置が三角形内にあるかどうか
+    bool touchOver() const
+    {
+        return contains(Input::Touch.pos());
+    }
+
+    // タッチが開始されたかどうか
+    bool touched() const
+    {
+        return Input::Touch.down() && contains(Input::Touch.pos());
+    }
+
+    // タッチが離されたかどうか
+    bool released() const
+    {
+        return Input::Touch.up() && contains(Input::Touch.pos());
+    }
+
+    // 継続的なタッチ判定
+    bool pressed() const
+    {
+        return Input::Touch.pressed() && contains(Input::Touch.pos());
     }
 };
 

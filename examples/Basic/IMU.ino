@@ -1,11 +1,11 @@
 #include <M5Siv3D.h>
 
 void setup() {
-    System::getInstance().setBackgroundColor(Palette::Blue);
+    System::setBackgroundColor(Palette::Blue);
 }
 
 void loop() {
-    if (System::getInstance().Update()) {
+    if (System::Update()) {
         auto& canvas = System::getInstance().getCanvas();
         const int centerX = canvas.width() / 2;
         const int centerY = canvas.height() / 2;

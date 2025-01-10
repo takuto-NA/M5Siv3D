@@ -7,7 +7,7 @@ void Main()
   
   Font font(fonts::lgfxJapanGothicP_12);
 
-  while(System.Update())
+  while(System::Update())
   {
     font.draw("Hello, World!", 10, 10, Palette::Black);
   }
