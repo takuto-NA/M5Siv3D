@@ -1140,56 +1140,84 @@ struct Line
 // Font構造体の拡張
 struct Font
 {
-    // TextAlignをFont構造体の外に移動
-    enum class TextAlign
+    // 水平方向のテキストアライメント
+    enum class HorizontalAlign
     {
         Left,
         Center,
         Right
     };
 
-    TextAlign align; // これで TextAlign が認識される
-
-    const lgfx::IFont *m_fontPtr;
-    float m_size = 1.0f; // サイズ指定用の変数を追加
-
-    // コンストラクタを修正
-    Font(const lgfx::IFont &font = fonts::Font0)
-        : m_fontPtr(&font), align(TextAlign::Left) {}
-
-    Font &setAlign(TextAlign a)
+    // 垂直方向のテキストアライメント
+    enum class VerticalAlign
     {
-        align = a;
+        Top,
+        Center,
+        Bottom,
+        Baseline  // テキストのベースラインに合わせる
+    };
+
+    HorizontalAlign hAlign;
+    VerticalAlign vAlign;
+    const lgfx::IFont *m_fontPtr;
+    float m_size = 1.0f;
+
+    // コンストラクタを更新
+    Font(const lgfx::IFont &font = fonts::Font0)
+        : m_fontPtr(&font), hAlign(HorizontalAlign::Left), vAlign(VerticalAlign::Baseline) {}
+
+    // 水平アライメント設定
+    Font &setHorizontalAlign(HorizontalAlign a)
+    {
+        hAlign = a;
         return *this;
     }
 
-    // サイズ設定用のメソッドを追加
-    Font &setSize(float size)
+    // 垂直アライメント設定
+    Font &setVerticalAlign(VerticalAlign a)
+    {
+        vAlign = a;
+        return *this;
+    }
+
+    // サイズ設定メソッドを追加
+    Font& setSize(float size)
     {
         m_size = size;
         return *this;
     }
 
-    // 描画メソッドを修正
     void draw(const String &text, int x, int y, const Color &color = Palette::White)
     {
         auto &canvas = System::getInstance().getCanvas();
         canvas.setTextColor(color.toRGB565());
         canvas.setFont(m_fontPtr);
-        canvas.setTextSize(m_size); // サイズを設定
+        canvas.setTextSize(m_size);
 
-        // テキストアライメントの処理
+        // 水平方向のアライメント処理
         int actualX = x;
-        if (align != TextAlign::Left)
+        if (hAlign != HorizontalAlign::Left)
         {
             int w = textWidth(text);
-            if (align == TextAlign::Center)
+            if (hAlign == HorizontalAlign::Center)
                 actualX = x - (w / 2);
-            else if (align == TextAlign::Right)
+            else if (hAlign == HorizontalAlign::Right)
                 actualX = x - w;
         }
 
-        canvas.drawString(text, actualX, y);
+        // 垂直方向のアライメント処理
+        int actualY = y;
+        if (vAlign != VerticalAlign::Baseline)
+        {
+            int h = textHeight();
+            if (vAlign == VerticalAlign::Center)
+                actualY = y - (h / 2) / 2;
+            else if (vAlign == VerticalAlign::Bottom)
+                actualY = y - h;
+            // Top alignment uses the original y position
+        }
+
+        canvas.drawString(text, actualX, actualY);
     }
 
     // 描画位置を指定するための構造体
@@ -1221,6 +1249,13 @@ struct Font
     Rect region(const String &text, int x, int y) const
     {
         return Rect(x, y, textWidth(text), textHeight());
+    }
+
+    // 後方互換性のため、TextAlignを残す（非推奨）
+    using TextAlign = HorizontalAlign;
+    Font &setAlign(TextAlign a)
+    {
+        return setHorizontalAlign(static_cast<HorizontalAlign>(a));
     }
 };
 
@@ -1505,15 +1540,13 @@ namespace SimpleGUI
 
         // テキストの描画
         auto& font = detail::GetFont();
-        font.setAlign(Font::TextAlign::Center);
-        
-        const int32_t textHeight = font.textHeight();
-        const int32_t verticalCenter = pos.y + (DefaultStyle.DefaultHeight - textHeight) / 2;
+        font.setHorizontalAlign(Font::HorizontalAlign::Center)
+            .setVerticalAlign(Font::VerticalAlign::Center);
         
         font(label, Font::Pos(
             pos.x + button.m_width/2, 
-            verticalCenter
-        ), DefaultStyle.TextColor);
+            pos.y + DefaultStyle.DefaultHeight/2
+        ), enabled ? DefaultStyle.TextColor : DefaultStyle.DisabledColor);
 
         return enabled && button.released();
     }
@@ -1536,9 +1569,16 @@ namespace SimpleGUI
         static constexpr int32_t cornerRadius = 4;
         static constexpr int32_t trackHeight = 6;  // スライダーのトラック高さ
 
+        // スライダーの背景
+        slider.drawRound(cornerRadius, DefaultStyle.BackgroundColor);
+        slider.drawRoundFrame(cornerRadius, DefaultStyle.TextColor);
+
         // スライダーの背景（トラック）
         const int32_t trackY = pos.y + (DefaultStyle.DefaultHeight - trackHeight) / 2;
-        Rect track(pos.x, trackY, width, trackHeight);
+        Rect track(pos.x + DefaultStyle.DefaultPadding, 
+                  trackY, 
+                  width - DefaultStyle.DefaultPadding * 2, 
+                  trackHeight);
         
         if (enabled)
         {
@@ -1548,23 +1588,28 @@ namespace SimpleGUI
 
             // アクティブな部分を描画
             const double normalizedValue = (value - min) / (max - min);
-            const int32_t activeWidth = static_cast<int32_t>(normalizedValue * width);
+            const int32_t activeWidth = static_cast<int32_t>(normalizedValue * (width - DefaultStyle.DefaultPadding * 2));
             if (activeWidth > 0)
             {
-                Rect activeTrack(pos.x, trackY, activeWidth, trackHeight);
+                Rect activeTrack(pos.x + DefaultStyle.DefaultPadding, 
+                               trackY, 
+                               activeWidth, 
+                               trackHeight);
                 activeTrack.drawRound(cornerRadius, DefaultStyle.ActiveColor);
             }
 
             // スライダーの操作
             if (slider.pressed())
             {
-                const int32_t touchX = Input::Touch.pos().x - pos.x;
-                value = min + (max - min) * (Math::clamp(static_cast<double>(touchX) / width, 0.0, 1.0));
+                const int32_t touchX = Input::Touch.pos().x - (pos.x + DefaultStyle.DefaultPadding);
+                const int32_t effectiveWidth = width - DefaultStyle.DefaultPadding * 2;
+                value = min + (max - min) * (Math::clamp(static_cast<double>(touchX) / effectiveWidth, 0.0, 1.0));
                 changed = true;
             }
 
             // つまみの描画
-            const int32_t thumbX = pos.x + static_cast<int32_t>(normalizedValue * (width - DefaultStyle.DefaultHeight/2));
+            const int32_t thumbX = pos.x + DefaultStyle.DefaultPadding + 
+                                 static_cast<int32_t>(normalizedValue * (width - DefaultStyle.DefaultPadding * 2 - DefaultStyle.DefaultHeight/2));
             Circle thumb(thumbX + DefaultStyle.DefaultHeight/4, 
                         pos.y + DefaultStyle.DefaultHeight/2, 
                         DefaultStyle.DefaultHeight/3);
@@ -1578,7 +1623,8 @@ namespace SimpleGUI
             track.drawRoundFrame(cornerRadius, Color(180, 180, 180));
 
             const double normalizedValue = (value - min) / (max - min);
-            const int32_t thumbX = pos.x + static_cast<int32_t>(normalizedValue * (width - DefaultStyle.DefaultHeight/2));
+            const int32_t thumbX = pos.x + DefaultStyle.DefaultPadding + 
+                                 static_cast<int32_t>(normalizedValue * (width - DefaultStyle.DefaultPadding * 2 - DefaultStyle.DefaultHeight/2));
             Circle thumb(thumbX + DefaultStyle.DefaultHeight/4, 
                         pos.y + DefaultStyle.DefaultHeight/2, 
                         DefaultStyle.DefaultHeight/3);
@@ -1597,13 +1643,24 @@ namespace SimpleGUI
                       int32_t sliderWidth = DefaultStyle.DefaultWidth,
                       bool enabled = true)
     {
+        // 背景の描画
+        Rect background(pos.x, pos.y, labelWidth + DefaultStyle.DefaultMargin + sliderWidth, DefaultStyle.DefaultHeight);
+        static constexpr int32_t cornerRadius = 4;
+        background.drawRound(cornerRadius, DefaultStyle.BackgroundColor);
+        background.drawRoundFrame(cornerRadius, DefaultStyle.TextColor);
+
         // ラベルの描画
         auto& font = detail::GetFont();
-        font.setAlign(Font::TextAlign::Left);
-        font(label, Font::Pos(pos.x, pos.y + DefaultStyle.DefaultHeight/2 - font.textHeight()/2), 
-             enabled ? DefaultStyle.TextColor : DefaultStyle.DisabledColor);
+        font.setHorizontalAlign(Font::HorizontalAlign::Left)
+            .setVerticalAlign(Font::VerticalAlign::Center);
+            
+        font(label, Font::Pos(
+            pos.x + DefaultStyle.DefaultPadding, 
+            pos.y + DefaultStyle.DefaultHeight/2
+        ), enabled ? DefaultStyle.TextColor : DefaultStyle.DisabledColor);
 
-        return Slider(value, Math::Vec2i(pos.x + labelWidth + DefaultStyle.DefaultMargin, pos.y),
+        return Slider(value, 
+                     Math::Vec2i(pos.x + labelWidth + DefaultStyle.DefaultMargin, pos.y),
                      min, max, sliderWidth, enabled);
     }
 
@@ -1667,10 +1724,12 @@ namespace SimpleGUI
 
         // ラベルの描画
         auto& font = detail::GetFont();
-        font.setAlign(Font::TextAlign::Left);
+        font.setHorizontalAlign(Font::HorizontalAlign::Left)
+            .setVerticalAlign(Font::VerticalAlign::Center);
+            
         font(label, Font::Pos(
             pos.x + DefaultStyle.DefaultHeight + DefaultStyle.DefaultMargin,
-            pos.y + DefaultStyle.DefaultHeight/2 - font.textHeight()/2
+            pos.y + DefaultStyle.DefaultHeight/2
         ), enabled ? DefaultStyle.TextColor : DefaultStyle.DisabledColor);
 
         return changed;
@@ -1749,10 +1808,12 @@ namespace SimpleGUI
 
             // ラベルの描画
             auto& font = detail::GetFont();
-            font.setAlign(Font::TextAlign::Left);
+            font.setHorizontalAlign(Font::HorizontalAlign::Left)
+                .setVerticalAlign(Font::VerticalAlign::Center);
+                
             font(options[i], Font::Pos(
                 button.m_x + DefaultStyle.DefaultHeight + DefaultStyle.DefaultMargin,
-                button.m_y + DefaultStyle.DefaultHeight/2 - font.textHeight()/2
+                button.m_y + DefaultStyle.DefaultHeight/2
             ), enabled ? DefaultStyle.TextColor : DefaultStyle.DisabledColor);
         }
 

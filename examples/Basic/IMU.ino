@@ -1,7 +1,8 @@
 #include <M5Siv3D.h>
 
 void setup() {
-    System::setBackgroundColor(Palette::Blue);
+    System::SetBackgroundColor(Palette::Blue);
+    Serial.begin(115200);  // シリアル通信の初期化
 }
 
 void loop() {
@@ -10,9 +11,23 @@ void loop() {
         const int centerX = canvas.width() / 2;
         const int centerY = canvas.height() / 2;
 
+        const float deltaTime = System::getInstance().getDeltaTime();
+        static float prevRad = 0.0f;  // 前回の角度を保存
+        
+        // 現在の角度を取得
+        float rad = Input::IMU.getAngles(deltaTime).yaw * M_PI / 180.0f;
+        
+        // 角速度を計算 (rad/s)
+        float angularVelocity = (rad - prevRad) / deltaTime;
+        prevRad = rad;
+
+        // シリアルで角度と角速度を送信
+        Serial.print(rad);
+        Serial.print(",");
+        Serial.println(angularVelocity);
+
         // 回転する三角形を描画
         const int triangleSize = 40;
-        float rad = Input::IMU.getAngles(System::getInstance().getDeltaTime()).yaw * M_PI / 180.0f;
         Math::Vec2f p1(0, -triangleSize);
         Math::Vec2f p2(-triangleSize, triangleSize);
         Math::Vec2f p3(triangleSize, triangleSize);
