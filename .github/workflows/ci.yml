@@ -9,6 +9,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
     - uses: actions/checkout@v3
     
@@ -23,25 +24,24 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.x'
+        python-version: '3.10'
+        cache: 'pip'
 
-    - name: Install PlatformIO
+    - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
         pip install platformio
 
-    - name: List PlatformIO Boards
-      run: |
-        pio boards m5stack
-
-    - name: Run PlatformIO Check
-      run: |
-        pio check -e compile-test --skip-packages -v
-
-    - name: Build all target boards
-      run: |
-        pio run -e m5stack-core -e m5stack-core2 -e m5stack-atoms3 -e m5stack-dial -v
+    - name: Run static analysis (cppcheck)
+      run: pio check -e compile-test --skip-packages -v
 
     - name: Run Unit Tests
+      run: pio test -e compile-test -v
+
+    - name: Build all boards
       run: |
-        pio test -e native -v 
+        pio run -e compile-test \
+                -e m5stack-core \
+                -e m5stack-core2 \
+                -e m5stack-atoms3 \
+                -e m5stack-dial -v 
