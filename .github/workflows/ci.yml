@@ -36,11 +36,11 @@ jobs:
 
     - name: Run PlatformIO Check
       run: |
-        pio check -v
+        pio check -e compile-test --skip-packages -v
 
-    - name: Run Compile Tests
+    - name: Build all target boards
       run: |
-        pio run -e compile-test -v
+        pio run -e m5stack-core -e m5stack-core2 -e m5stack-atoms3 -e m5stack-dial -v
 
     - name: Run Unit Tests
       run: |
