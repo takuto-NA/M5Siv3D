@@ -14,7 +14,74 @@
  * through a simplified, yet powerful programming interface.
  */
 
-#include <M5Unified.h>
+// =============================================================================
+// M5 Device Selection - M5Dial and M5Unified Support
+// =============================================================================
+
+#ifdef USE_M5_DIAL
+    #include "M5Dial.h"
+    #define M5_DEVICE M5Dial
+    
+    // M5Dial compatibility layer - 完全にM5Dialのみを使用
+    namespace M5RealUnified {
+        // M5Dial専用の実装
+        m5::M5_DIAL& getDevice() { return M5Dial; }
+        M5GFX& getDisplay() { return M5Dial.Display; }
+        m5::Touch_Class& getTouch() { return M5Dial.Touch; }
+        m5::Power_Class& getPower() { return M5Dial.Power; }
+        m5::Speaker_Class& getSpeaker() { return M5Dial.Speaker; }
+        
+        // M5Dial specific features
+        ENCODER& getEncoder() { return M5Dial.Encoder; }
+        MFRC522& getRfid() { return M5Dial.Rfid; }
+        
+        // ボタン：M5DialのBtnAのみ使用、B/Cは無効なダミー
+        m5::Button_Class& getButtonA() { return M5Dial.BtnA; }
+        m5::Button_Class* getButtonBPtr() { return nullptr; }  // ダミー（nullptrを返す）
+        m5::Button_Class* getButtonCPtr() { return nullptr; }  // ダミー（nullptrを返す）
+        
+        // M5Dial用の設定とDelay
+        m5::M5Unified::config_t config() { 
+            m5::M5Unified::config_t cfg;
+            return cfg; 
+        }
+        void delay(uint32_t ms) { ::delay(ms); }
+        
+        // Update function - M5Dialのみ
+        void update() { 
+            M5Dial.update();
+        }
+        
+        // Begin function - M5Dialのみ
+        template<typename... Args>
+        void begin(Args&&... args) { M5Dial.begin(std::forward<Args>(args)...); }
+    }
+    
+    // For M5Dial, we still need access to M5Unified features
+    // Don't redefine M5 completely, let M5Dial handle what it can
+    
+#else
+    #include <M5Unified.h>
+    #define M5_DEVICE M5
+    
+    // Standard M5Unified compatibility layer
+    namespace M5RealUnified {
+        m5::M5Unified& getDevice() { return M5; }
+        M5GFX& getDisplay() { return M5.Display; }
+        m5::Touch_Class& getTouch() { return M5.Touch; }
+        m5::Power_Class& getPower() { return M5.Power; }
+        m5::Speaker_Class& getSpeaker() { return M5.Speaker; }
+        m5::Button_Class& getButtonA() { return M5.BtnA; }
+        
+        // Update and begin functions
+        void update() { M5.update(); }
+        
+        template<typename... Args>
+        void begin(Args&&... args) { M5.begin(std::forward<Args>(args)...); }
+    }
+    
+#endif
+
 #include <base64.hpp>  // Densaugeoのライブラリ
 #include <SPI.h>
 #include <sstream>
@@ -213,9 +280,6 @@ using Math::clamp;
 using Math::abs;
 using Math::min;
 using Math::max;
-using Math::sin;
-using Math::cos;
-using Math::tan;
 using Math::lerp;
 using Math::Pi;
 using Math::TwoPi;
@@ -234,6 +298,9 @@ struct Color
     uint8_t r;
     uint8_t g;
     uint8_t b;
+
+    // デフォルトコンストラクタを追加
+    Color() : r(0), g(0), b(0) {}
 
     Color(uint8_t red, uint8_t green, uint8_t blue) : r(red), g(green), b(blue) {}
 
@@ -441,18 +508,22 @@ namespace Input
     public:
         ButtonState(m5::Button_Class *btn) : m_button(btn) {}
 
-        bool down() const { return m_button->isPressed(); }
-        bool up() const { return m_button->isReleased(); }
-        bool pressed() const { return m_button->wasPressed(); }
-        bool released() const { return m_button->wasReleased(); }
-        bool pressedDuration(uint32_t ms) const { return m_button->pressedFor(ms); }
-        bool releasedDuration(uint32_t ms) const { return m_button->releasedFor(ms); }
+        bool down() const { return m_button ? m_button->isPressed() : false; }
+        bool up() const { return m_button ? m_button->isReleased() : false; }
+        bool pressed() const { return m_button ? m_button->wasPressed() : false; }
+        bool released() const { return m_button ? m_button->wasReleased() : false; }
+        bool pressedDuration(uint32_t ms) const { return m_button ? m_button->pressedFor(ms) : false; }
+        bool releasedDuration(uint32_t ms) const { return m_button ? m_button->releasedFor(ms) : false; }
     };
 
     // グローバルなボタンステート
-    inline ButtonState ButtonA{&M5.BtnA};
-    inline ButtonState ButtonB{&M5.BtnB};
-    inline ButtonState ButtonC{&M5.BtnC};
+    ButtonState& getButtonA() { static ButtonState instance(&M5RealUnified::getButtonA()); return instance; }
+    ButtonState& getButtonB() { static ButtonState instance(M5RealUnified::getButtonBPtr()); return instance; }
+    ButtonState& getButtonC() { static ButtonState instance(M5RealUnified::getButtonCPtr()); return instance; }
+    
+    #define ButtonA getButtonA()
+    #define ButtonB getButtonB() 
+    #define ButtonC getButtonC()
 
     class IMU
     {
@@ -543,7 +614,8 @@ namespace Input
     };
 
     // グローバルなIMUインスタンス
-    inline IMU &IMU = IMU::getInstance();
+    IMU& getIMU() { return IMU::getInstance(); }
+    #define IMU getIMU()
 
     // タッチ入力を管理するクラス
     class TouchInput
@@ -607,7 +679,153 @@ namespace Input
     };
 
     // グローバルなタッチ入力インスタンス
-    inline TouchInput& Touch = TouchInput::getInstance();
+    TouchInput& getTouch() { return TouchInput::getInstance(); }
+    #define Touch getTouch()
+
+    // =============================================================================
+    // M5Dial Specific Features - Encoder and RFID Support
+    // =============================================================================
+
+#ifdef USE_M5_DIAL
+    // M5Dialのエンコーダー機能をSiv3D風にラップ
+    class DialEncoder
+    {
+    public:
+        static DialEncoder& getInstance()
+        {
+            static DialEncoder instance;
+            return instance;
+        }
+
+        // 基本的なM5Dial API
+        long read() { return M5RealUnified::getEncoder().read(); }
+        void write(long value) { M5RealUnified::getEncoder().write(value); }
+        long readAndReset() { return M5RealUnified::getEncoder().readAndReset(); }
+
+        // Siv3D風の拡張API（ユーザビリティ向上）
+        long getValue() { return read(); }
+        void setValue(long value) { write(value); }
+        void reset() { readAndReset(); }
+
+        // 変化量を取得
+        long getDelta() 
+        {
+            long current = read();
+            long delta = current - m_previousValue;
+            m_previousValue = current;
+            return delta;
+        }
+
+        // 変化があったかどうか
+        bool changed() 
+        {
+            return read() != m_previousValue;
+        }
+
+        // 更新処理（InputManagerから呼び出される）
+        void update()
+        {
+            // エンコーダーの状態更新（必要に応じて）
+        }
+
+    private:
+        DialEncoder() = default;
+        long m_previousValue = 0;
+    };
+
+    // M5DialのRFID機能をSiv3D風にラップ
+    class DialRFID
+    {
+    public:
+        static DialRFID& getInstance()
+        {
+            static DialRFID instance;
+            return instance;
+        }
+
+        // カードが検出されているかチェック
+        bool isCardPresent() 
+        {
+            // 簡単なカード検出実装（実際のMFRC522 APIに応じて調整が必要）
+            // これはプレースホルダー実装です
+            return false;  // TODO: 実際のRFID検出ロジックを実装
+        }
+
+        // カードのUIDを読み取り
+        String readCardUID()
+        {
+            // 簡単なUID読み取り実装（実際のMFRC522 APIに応じて調整が必要）
+            // これはプレースホルダー実装です
+            return "";  // TODO: 実際のUID読み取りロジックを実装
+        }
+
+        // カードデータを読み取り
+        bool readCardData(uint8_t blockAddr, uint8_t* buffer, uint8_t bufferSize)
+        {
+            // 簡単なデータ読み取り実装（実際のMFRC522 APIに応じて調整が必要）
+            return false;  // TODO: 実際のデータ読み取りロジックを実装
+        }
+
+        // カードデータを書き込み
+        bool writeCardData(uint8_t blockAddr, uint8_t* buffer, uint8_t bufferSize)
+        {
+            // 簡単なデータ書き込み実装（実際のMFRC522 APIに応じて調整が必要）
+            return false;  // TODO: 実際のデータ書き込みロジックを実装
+        }
+
+        // 更新処理（InputManagerから呼び出される）
+        void update()
+        {
+            // RFID の状態更新（必要に応じて）
+        }
+
+    private:
+        DialRFID() = default;
+    };
+
+    // グローバルなM5Dial機能インスタンス
+    DialEncoder& getDialEncoder() { return DialEncoder::getInstance(); }
+    DialRFID& getDialRFID() { return DialRFID::getInstance(); }
+    
+    #define Encoder getDialEncoder()
+    #define RFID getDialRFID()
+
+#else
+    // M5Dial以外のデバイスでは空のクラスを提供（コンパイルエラー回避）
+    class DummyEncoder
+    {
+    public:
+        static DummyEncoder& getInstance() { static DummyEncoder instance; return instance; }
+        long read() { return 0; }
+        void write(long) {}
+        long readAndReset() { return 0; }
+        long getValue() { return 0; }
+        void setValue(long) {}
+        void reset() {}
+        long getDelta() { return 0; }
+        bool changed() const { return false; }
+        void update() {}
+    };
+
+    class DummyRFID
+    {
+    public:
+        static DummyRFID& getInstance() { static DummyRFID instance; return instance; }
+        bool isCardPresent() { return false; }
+        String readCardUID() { return ""; }
+        bool readCardData(uint8_t, uint8_t*, uint8_t) { return false; }
+        bool writeCardData(uint8_t, uint8_t*, uint8_t) { return false; }
+        void update() {}
+    };
+
+    // ダミーインスタンス（M5Dial以外では機能しない）
+    DummyEncoder& getDummyEncoder() { return DummyEncoder::getInstance(); }
+    DummyRFID& getDummyRFID() { return DummyRFID::getInstance(); }
+    
+    #define Encoder getDummyEncoder()
+    #define RFID getDummyRFID()
+
+#endif
 
   class InputManager
     {
@@ -620,10 +838,14 @@ namespace Input
 
         void update()
         {
-            M5.update();  // M5の状態を更新
-            M5.Imu.update();
-            Touch.update();
-            }
+            M5RealUnified::update();  // M5Dialの状態を更新
+            // M5.Imu.update();  // M5Dialでは直接アクセスしない
+            Input::TouchInput::getInstance().update();
+#ifdef USE_M5_DIAL
+            Input::DialEncoder::getInstance().update();
+            Input::DialRFID::getInstance().update();
+#endif
+        }
 
     private:
         InputManager() = default;
@@ -645,11 +867,16 @@ public:
     // システムの初期化
     void init()
     {
-        auto cfg = M5.config();
-        M5.begin(cfg);
+#ifdef USE_M5_DIAL
+        // M5Dial専用初期化 - エンコーダーとRFIDを有効化
+        M5Dial.begin(true, true);  // enableEncoder=true, enableRFID=true
+#else
+        auto cfg = M5RealUnified::config();
+        M5RealUnified::begin(cfg);
+#endif
 
         // キャンバスを画面のサイズで初期化
-        canvas.createSprite(M5.Display.width(), M5.Display.height());
+        canvas.createSprite(M5RealUnified::getDisplay().width(), M5RealUnified::getDisplay().height());
         canvas.setTextSize(2);
         lastDrawTime = millis();
     }
@@ -701,7 +928,7 @@ public:
             int32_t remaining = FRAME_INTERVAL - (millis() - currentTime);
             if (remaining > 0)
             {
-                M5.delay(remaining);
+                M5RealUnified::delay(remaining);
             }
 
             Input::InputManager::getInstance().update();
@@ -727,8 +954,8 @@ public:
         return getInstance().getHeight();
     }
 
-    int getWidth() const { return M5.Display.width(); }
-    int getHeight() const { return M5.Display.height(); }
+    int getWidth() const { return M5RealUnified::getDisplay().width(); }
+    int getHeight() const { return M5RealUnified::getDisplay().height(); }
 
     // 時間管理関連のメソッドを追加
 
@@ -771,7 +998,7 @@ private:
     // システム変数
     static constexpr int FRAME_INTERVAL = 16; // 約60FPS
     uint32_t lastDrawTime = 0;
-    M5Canvas canvas{&M5.Display};
+    M5Canvas canvas{&M5RealUnified::getDisplay()};
 
     // コピー禁止
     System(const System &) = delete;
@@ -838,15 +1065,16 @@ private:
 };
 
 // グローバル関数として定義
-inline PrintManager& Print = PrintManager::getInstance();
+PrintManager& getPrint() { return PrintManager::getInstance(); }
+#define Print getPrint()
 
-inline void ClearPrint() {
-    Print.clear();
+void ClearPrint() {
+    getPrint().clear();
 }
 
 // システムのendDraw()内で呼び出すための描画関数
-inline void drawPrint() {
-    Print.draw();
+void drawPrint() {
+    getPrint().draw();
 }
 
 
@@ -1477,7 +1705,8 @@ namespace SimpleGUI
         Color DisabledColor = Color(200, 200, 200);
     };
 
-    inline Style DefaultStyle;
+    Style& getDefaultStyle() { static Style instance; return instance; }
+    #define DefaultStyle getDefaultStyle()
 
     // 共通のフォントインスタンス
     namespace detail

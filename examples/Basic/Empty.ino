@@ -2,7 +2,7 @@
 
 void Main()
 {
-  System.setBackgroundColor(Palette::White);
+  System::SetBackgroundColor(Palette::White);
 
   
   Font font(fonts::lgfxJapanGothicP_12);
