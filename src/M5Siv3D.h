@@ -14,6 +14,35 @@
  * through a simplified, yet powerful programming interface.
  */
 
+#pragma once
+
+// =============================================================================
+// メモリ最適化設定 - 必要なフォントのみ有効化
+// =============================================================================
+
+// 基本フォントセット（常に有効）
+#define M5SIV3D_ENABLE_BASIC_FONTS 1
+
+// 日本語フォント（大容量）
+#ifndef M5SIV3D_ENABLE_JAPANESE_FONTS
+#define M5SIV3D_ENABLE_JAPANESE_FONTS 1  // デフォルトで有効
+#endif
+
+// 装飾フォント（中容量）
+#ifndef M5SIV3D_ENABLE_DECORATIVE_FONTS
+#define M5SIV3D_ENABLE_DECORATIVE_FONTS 1  // デフォルトで有効
+#endif
+
+// 大きなフォント（32px以上）
+#ifndef M5SIV3D_ENABLE_LARGE_FONTS
+#define M5SIV3D_ENABLE_LARGE_FONTS 1  // デフォルトで有効
+#endif
+
+// 太字フォント
+#ifndef M5SIV3D_ENABLE_BOLD_FONTS
+#define M5SIV3D_ENABLE_BOLD_FONTS 1  // デフォルトで有効
+#endif
+
 // =============================================================================
 // M5 Device Selection - M5Dial and M5Unified Support
 // =============================================================================
@@ -217,6 +246,11 @@
 #include <functional>
 #include <mutex>      // C++17 std::call_once用
 #include <type_traits> // C++17 型特性用
+#include <string_view> // C++17 string_view
+#include <array>       // C++17 std::array
+
+// C++17 using宣言
+using namespace std::string_view_literals;
 
 // 数学ユーティリティを格納する名前空間
 namespace Math
@@ -1886,7 +1920,442 @@ struct Line
     }
 };
 
+// =============================================================================
+// Font System - Easy Font Selection and Management
+// =============================================================================
+
+// フォントカテゴリ列挙型
+namespace FontCategory
+{
+    enum class Type : uint8_t
+    {
+        ASCII,      // 英語・ASCII文字専用
+        Japanese,   // 日本語対応
+        Decorative, // 装飾フォント
+        Monospace   // 等幅フォント
+    };
+
+    enum class Weight : uint8_t
+    {
+        Thin,
+        Light,
+        Regular,
+        Bold
+    };
+
+    enum class Style : uint8_t
+    {
+        Normal,
+        Italic,
+        Oblique
+    };
+
+    enum class Size : uint8_t
+    {
+        XSmall,  // 8-10px
+        Small,   // 12-14px
+        Medium,  // 16-18px
+        Large,   // 20-24px
+        XLarge,  // 28-32px
+        XXLarge  // 36px以上
+    };
+}
+
+// C++17 フォント情報構造体（遅延読み込み対応）
+struct FontInfo
+{
+    using FontGetter = const lgfx::IFont* (*)();  // フォント取得関数ポインタ
+    
+    FontGetter fontGetter;       // 遅延読み込み用関数ポインタ
+    std::string_view name;       // C++17 string_view
+    FontCategory::Type category;
+    FontCategory::Weight weight;
+    FontCategory::Style style;
+    FontCategory::Size size;
+    uint8_t pixelHeight;
+    bool supportsJapanese;
+
+    // C++17 constexpr コンストラクタ（遅延読み込み対応）
+    constexpr FontInfo(FontGetter getter, std::string_view n, 
+                      FontCategory::Type cat, FontCategory::Weight w, 
+                      FontCategory::Style st, FontCategory::Size sz, 
+                      uint8_t height, bool japanese = false) noexcept
+        : fontGetter(getter), name(n), category(cat), weight(w), style(st), 
+          size(sz), pixelHeight(height), supportsJapanese(japanese) {}
+          
+    // C++17 安全なアクセサ（遅延読み込み）
+    [[nodiscard]] const lgfx::IFont& getFont() const noexcept { 
+        return *fontGetter();  // 必要な時だけフォントを取得
+    }
+    
+    // ポインタ取得メソッド（遅延読み込み）
+    [[nodiscard]] const lgfx::IFont* getFontPtr() const noexcept {
+        return fontGetter();  // 必要な時だけフォントを取得
+    }
+    
+    // 実行時安全性チェック
+    [[nodiscard]] bool isValid() const noexcept {
+        return fontGetter != nullptr;
+    }
+};
+
+// フォントレジストリ（組み込みフォント一覧）
+namespace FontRegistry
+{
+    // C++17 日本語フォント（遅延読み込み対応）
+    namespace Japanese
+    {
+#if M5SIV3D_ENABLE_JAPANESE_FONTS
+        // フォント取得関数（実際に存在するM5GFXフォントを使用）
+        inline const lgfx::IFont* getGothic8() { return &fonts::efontJA_10; }  // 8pxは存在しないので10pxを使用
+        inline const lgfx::IFont* getGothic12() { return &fonts::efontJA_12; }
+        inline const lgfx::IFont* getGothic16() { return &fonts::efontJA_16; }
+        inline const lgfx::IFont* getGothic20() { return &fonts::efontJA_24; }  // 20pxは存在しないので24pxを使用
+        inline const lgfx::IFont* getGothic24() { return &fonts::efontJA_24; }
+        inline const lgfx::IFont* getGothic28() { return &fonts::efontJA_24; }  // 28pxは存在しないので24pxを使用
+        
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline const lgfx::IFont* getGothic32() { return &fonts::efontJA_24; }  // 32pxは存在しないので24pxを使用
+        inline const lgfx::IFont* getGothic36() { return &fonts::efontJA_24; }  // 36pxは存在しないので24pxを使用
+        inline const lgfx::IFont* getGothic40() { return &fonts::efontJA_24; }  // 40pxは存在しないので24pxを使用
+#endif
+        
+        // Mincho系は実際に存在するフォントを使用
+        inline const lgfx::IFont* getMincho8() { return &fonts::efontJA_10; }  // 8pxは存在しないので10pxを使用
+        inline const lgfx::IFont* getMincho12() { return &fonts::efontJA_12; }  // Minchoの代替
+        inline const lgfx::IFont* getMincho16() { return &fonts::efontJA_16; }  // Minchoの代替
+        inline const lgfx::IFont* getMincho20() { return &fonts::efontJA_24; }  // 20pxは存在しないので24pxを使用
+        inline const lgfx::IFont* getMincho24() { return &fonts::efontJA_24; }  // Minchoの代替
+        inline const lgfx::IFont* getMincho28() { return &fonts::efontJA_24; }  // Minchoの代替
+        
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline const lgfx::IFont* getMincho32() { return &fonts::efontJA_24; }  // Minchoの代替（32pxは存在しないので24pxを使用）
+        inline const lgfx::IFont* getMincho36() { return &fonts::efontJA_24; }  // Minchoの代替（36pxは存在しないので24pxを使用）
+        inline const lgfx::IFont* getMincho40() { return &fonts::efontJA_24; }  // Minchoの代替（40pxは存在しないので24pxを使用）
+#endif
+#else
+        // 日本語フォント無効時のフォールバック
+        inline const lgfx::IFont* getGothic16() { return &fonts::Font2; }  // 基本フォントにフォールバック
+        inline const lgfx::IFont* getMincho16() { return &fonts::Font2; }  // 基本フォントにフォールバック
+#endif
+
+        // FontInfo定義（遅延読み込み対応）
+#if M5SIV3D_ENABLE_JAPANESE_FONTS
+        inline constexpr FontInfo Gothic8{getGothic8, "Japanese Gothic 8px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XSmall, 8, true};
+        inline constexpr FontInfo Gothic12{getGothic12, "Japanese Gothic 12px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Small, 12, true};
+        inline constexpr FontInfo Gothic16{getGothic16, "Japanese Gothic 16px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Medium, 16, true};
+        inline constexpr FontInfo Gothic20{getGothic20, "Japanese Gothic 20px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Large, 20, true};
+        inline constexpr FontInfo Gothic24{getGothic24, "Japanese Gothic 24px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Large, 24, true};
+        inline constexpr FontInfo Gothic28{getGothic28, "Japanese Gothic 28px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XLarge, 28, true};
+
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline constexpr FontInfo Gothic32{getGothic32, "Japanese Gothic 32px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XLarge, 32, true};
+        inline constexpr FontInfo Gothic36{getGothic36, "Japanese Gothic 36px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XXLarge, 36, true};
+        inline constexpr FontInfo Gothic40{getGothic40, "Japanese Gothic 40px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XXLarge, 40, true};
+#endif
+
+        inline constexpr FontInfo Mincho8{getMincho8, "Japanese Mincho 8px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XSmall, 8, true};
+        inline constexpr FontInfo Mincho12{getMincho12, "Japanese Mincho 12px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Small, 12, true};
+        inline constexpr FontInfo Mincho16{getMincho16, "Japanese Mincho 16px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Medium, 16, true};
+        inline constexpr FontInfo Mincho20{getMincho20, "Japanese Mincho 20px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Large, 20, true};
+        inline constexpr FontInfo Mincho24{getMincho24, "Japanese Mincho 24px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Large, 24, true};
+        inline constexpr FontInfo Mincho28{getMincho28, "Japanese Mincho 28px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XLarge, 28, true};
+
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline constexpr FontInfo Mincho32{getMincho32, "Japanese Mincho 32px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XLarge, 32, true};
+        inline constexpr FontInfo Mincho36{getMincho36, "Japanese Mincho 36px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XXLarge, 36, true};
+        inline constexpr FontInfo Mincho40{getMincho40, "Japanese Mincho 40px", 
+            FontCategory::Type::Japanese, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XXLarge, 40, true};
+#endif
+
+#else
+        // 日本語フォント無効時のフォールバック定義
+        inline constexpr FontInfo Gothic16{getGothic16, "Japanese Gothic 16px (Fallback)", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Medium, 16, false};
+        inline constexpr FontInfo Mincho16{getMincho16, "Japanese Mincho 16px (Fallback)", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Medium, 16, false};
+#endif
+    }
+
+    // C++17 英語フォント（遅延読み込み対応）
+    namespace English
+    {
+        // フォント取得関数（条件付きコンパイル対応）
+        // 基本フォント（常に有効）
+        inline const lgfx::IFont* getFont0() { return &fonts::Font0; }
+        inline const lgfx::IFont* getFont2() { return &fonts::Font2; }
+        inline const lgfx::IFont* getFont4() { return &fonts::Font4; }
+        
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline const lgfx::IFont* getFont6() { return &fonts::Font6; }
+        inline const lgfx::IFont* getFont7() { return &fonts::Font7; }
+        inline const lgfx::IFont* getFont8() { return &fonts::Font8; }
+#endif
+        
+        // FreeSans系
+        inline const lgfx::IFont* getFreeSans9() { return &fonts::FreeSans9pt7b; }
+        inline const lgfx::IFont* getFreeSans12() { return &fonts::FreeSans12pt7b; }
+        inline const lgfx::IFont* getFreeSans18() { return &fonts::FreeSans18pt7b; }
+        
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline const lgfx::IFont* getFreeSans24() { return &fonts::FreeSans24pt7b; }
+#endif
+        
+#if M5SIV3D_ENABLE_BOLD_FONTS
+        inline const lgfx::IFont* getFreeSansBold9() { return &fonts::FreeSansBold9pt7b; }
+        inline const lgfx::IFont* getFreeSansBold12() { return &fonts::FreeSansBold12pt7b; }
+        inline const lgfx::IFont* getFreeSansBold18() { return &fonts::FreeSansBold18pt7b; }
+        
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline const lgfx::IFont* getFreeSansBold24() { return &fonts::FreeSansBold24pt7b; }
+#endif
+#endif
+        
+        // FreeMono系（等幅）
+        inline const lgfx::IFont* getFreeMono9() { return &fonts::FreeMono9pt7b; }
+        inline const lgfx::IFont* getFreeMono12() { return &fonts::FreeMono12pt7b; }
+        inline const lgfx::IFont* getFreeMono18() { return &fonts::FreeMono18pt7b; }
+        
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline const lgfx::IFont* getFreeMono24() { return &fonts::FreeMono24pt7b; }
+#endif
+        
+#if M5SIV3D_ENABLE_BOLD_FONTS
+        inline const lgfx::IFont* getFreeMonoBold9() { return &fonts::FreeMonoBold9pt7b; }
+        inline const lgfx::IFont* getFreeMonoBold12() { return &fonts::FreeMonoBold12pt7b; }
+        inline const lgfx::IFont* getFreeMonoBold18() { return &fonts::FreeMonoBold18pt7b; }
+        
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline const lgfx::IFont* getFreeMonoBold24() { return &fonts::FreeMonoBold24pt7b; }
+#endif
+#endif
+        
+        // FreeSerif系
+        inline const lgfx::IFont* getFreeSerif9() { return &fonts::FreeSerif9pt7b; }
+        inline const lgfx::IFont* getFreeSerif12() { return &fonts::FreeSerif12pt7b; }
+        inline const lgfx::IFont* getFreeSerif18() { return &fonts::FreeSerif18pt7b; }
+        
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline const lgfx::IFont* getFreeSerif24() { return &fonts::FreeSerif24pt7b; }
+#endif
+        
+        // 極小フォント（常に有効）
+        inline const lgfx::IFont* getTomThumb() { return &fonts::TomThumb; }
+
+        // FontInfo定義（遅延読み込み対応）
+        // 基本フォント（常に有効）
+        inline constexpr FontInfo Font0{getFont0, "Default Font 0", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XSmall, 8, false};
+        inline constexpr FontInfo Font2{getFont2, "Default Font 2", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Medium, 16, false};
+        inline constexpr FontInfo Font4{getFont4, "Default Font 4", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Large, 26, false};
+        
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline constexpr FontInfo Font6{getFont6, "Default Font 6", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XLarge, 48, false};
+        inline constexpr FontInfo Font7{getFont7, "Default Font 7", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XLarge, 48, false};
+        inline constexpr FontInfo Font8{getFont8, "Default Font 8", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XXLarge, 75, false};
+#endif
+
+        // FreeSans系
+        inline constexpr FontInfo FreeSans9{getFreeSans9, "FreeSans 9pt", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Small, 12, false};
+        inline constexpr FontInfo FreeSans12{getFreeSans12, "FreeSans 12pt", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Medium, 16, false};
+        inline constexpr FontInfo FreeSans18{getFreeSans18, "FreeSans 18pt", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Large, 24, false};
+        
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline constexpr FontInfo FreeSans24{getFreeSans24, "FreeSans 24pt", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XLarge, 32};
+#endif
+
+#if M5SIV3D_ENABLE_BOLD_FONTS
+        inline constexpr FontInfo FreeSansBold9{getFreeSansBold9, "FreeSans Bold 9pt", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Bold, FontCategory::Style::Normal, FontCategory::Size::Small, 12};
+        inline constexpr FontInfo FreeSansBold12{getFreeSansBold12, "FreeSans Bold 12pt", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Bold, FontCategory::Style::Normal, FontCategory::Size::Medium, 16};
+        inline constexpr FontInfo FreeSansBold18{getFreeSansBold18, "FreeSans Bold 18pt", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Bold, FontCategory::Style::Normal, FontCategory::Size::Large, 24};
+        
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline constexpr FontInfo FreeSansBold24{getFreeSansBold24, "FreeSans Bold 24pt", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Bold, FontCategory::Style::Normal, FontCategory::Size::XLarge, 32};
+#endif
+#endif
+
+        // FreeMono系（等幅）
+        inline constexpr FontInfo FreeMono9{getFreeMono9, "FreeMono 9pt", 
+            FontCategory::Type::Monospace, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Small, 12};
+        inline constexpr FontInfo FreeMono12{getFreeMono12, "FreeMono 12pt", 
+            FontCategory::Type::Monospace, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Medium, 16};
+        inline constexpr FontInfo FreeMono18{getFreeMono18, "FreeMono 18pt", 
+            FontCategory::Type::Monospace, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Large, 24};
+        
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline constexpr FontInfo FreeMono24{getFreeMono24, "FreeMono 24pt", 
+            FontCategory::Type::Monospace, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XLarge, 32};
+#endif
+
+#if M5SIV3D_ENABLE_BOLD_FONTS
+        inline constexpr FontInfo FreeMonoBold9{getFreeMonoBold9, "FreeMono Bold 9pt", 
+            FontCategory::Type::Monospace, FontCategory::Weight::Bold, FontCategory::Style::Normal, FontCategory::Size::Small, 12};
+        inline constexpr FontInfo FreeMonoBold12{getFreeMonoBold12, "FreeMono Bold 12pt", 
+            FontCategory::Type::Monospace, FontCategory::Weight::Bold, FontCategory::Style::Normal, FontCategory::Size::Medium, 16};
+        inline constexpr FontInfo FreeMonoBold18{getFreeMonoBold18, "FreeMono Bold 18pt", 
+            FontCategory::Type::Monospace, FontCategory::Weight::Bold, FontCategory::Style::Normal, FontCategory::Size::Large, 24};
+        
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline constexpr FontInfo FreeMonoBold24{getFreeMonoBold24, "FreeMono Bold 24pt", 
+            FontCategory::Type::Monospace, FontCategory::Weight::Bold, FontCategory::Style::Normal, FontCategory::Size::XLarge, 32};
+#endif
+#endif
+
+        // FreeSerif系
+        inline constexpr FontInfo FreeSerif9{getFreeSerif9, "FreeSerif 9pt", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Small, 12};
+        inline constexpr FontInfo FreeSerif12{getFreeSerif12, "FreeSerif 12pt", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Medium, 16};
+        inline constexpr FontInfo FreeSerif18{getFreeSerif18, "FreeSerif 18pt", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Large, 24};
+        
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline constexpr FontInfo FreeSerif24{getFreeSerif24, "FreeSerif 24pt", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XLarge, 32};
+#endif
+
+        // 極小フォント（常に有効）
+        inline constexpr FontInfo TomThumb{getTomThumb, "TomThumb 6px", 
+            FontCategory::Type::ASCII, FontCategory::Weight::Light, FontCategory::Style::Normal, FontCategory::Size::XSmall, 6, false};
+    }
+
+    // C++17 装飾フォント（遅延読み込み対応）
+    namespace Decorative
+    {
+        // フォント取得関数（条件付きコンパイル対応）
+#if M5SIV3D_ENABLE_DECORATIVE_FONTS
+        inline const lgfx::IFont* getOrbitron24() { return &fonts::Orbitron_Light_24; }
+        inline const lgfx::IFont* getRoboto24() { return &fonts::Roboto_Thin_24; }
+        inline const lgfx::IFont* getSatisfy24() { return &fonts::Satisfy_24; }
+        
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline const lgfx::IFont* getOrbitron32() { return &fonts::Orbitron_Light_32; }
+        inline const lgfx::IFont* getYellowtail32() { return &fonts::Yellowtail_32; }
+#endif
+#endif
+
+        // FontInfo定義（遅延読み込み対応）
+#if M5SIV3D_ENABLE_DECORATIVE_FONTS
+        inline constexpr FontInfo Orbitron24{getOrbitron24, "Orbitron Light 24px", 
+            FontCategory::Type::Decorative, FontCategory::Weight::Light, FontCategory::Style::Normal, FontCategory::Size::Large, 24};
+        inline constexpr FontInfo Roboto24{getRoboto24, "Roboto Thin 24px", 
+            FontCategory::Type::Decorative, FontCategory::Weight::Thin, FontCategory::Style::Normal, FontCategory::Size::Large, 24};
+        inline constexpr FontInfo Satisfy24{getSatisfy24, "Satisfy 24px", 
+            FontCategory::Type::Decorative, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::Large, 24};
+        
+#if M5SIV3D_ENABLE_LARGE_FONTS
+        inline constexpr FontInfo Orbitron32{getOrbitron32, "Orbitron Light 32px", 
+            FontCategory::Type::Decorative, FontCategory::Weight::Light, FontCategory::Style::Normal, FontCategory::Size::XLarge, 32};
+        inline constexpr FontInfo Yellowtail32{getYellowtail32, "Yellowtail 32px", 
+            FontCategory::Type::Decorative, FontCategory::Weight::Regular, FontCategory::Style::Normal, FontCategory::Size::XLarge, 32};
+#endif
+#endif
+    }
+
+    // C++17 constexpr 全フォント一覧（メモリ最適化対応）
+    inline std::vector<const FontInfo*> getAllFonts() {
+        std::vector<const FontInfo*> fonts;
+        
+        // 基本フォント（常に有効）
+        fonts.push_back(&English::Font0);
+        fonts.push_back(&English::Font2);
+        fonts.push_back(&English::Font4);
+        fonts.push_back(&English::TomThumb);
+        
+        // 英語フォント（基本）
+        fonts.push_back(&English::FreeSans9);
+        fonts.push_back(&English::FreeSans12);
+        fonts.push_back(&English::FreeSans18);
+        fonts.push_back(&English::FreeMono9);
+        fonts.push_back(&English::FreeMono12);
+        fonts.push_back(&English::FreeMono18);
+        fonts.push_back(&English::FreeSerif9);
+        fonts.push_back(&English::FreeSerif12);
+        fonts.push_back(&English::FreeSerif18);
+
+#if M5SIV3D_ENABLE_JAPANESE_FONTS
+        // 日本語フォント（条件付き）
+        fonts.push_back(&Japanese::Gothic16);
+        fonts.push_back(&Japanese::Mincho16);
+#endif
+
+        return fonts;
+    }
+
+
+
+    // C++17 カテゴリ別フォント取得（アルゴリズム使用）
+    inline std::vector<const FontInfo*> getFontsByCategory(FontCategory::Type category) {
+        const auto allFonts = getAllFonts();
+        std::vector<const FontInfo*> result;
+        
+        std::copy_if(allFonts.begin(), allFonts.end(), std::back_inserter(result),
+            [category](const FontInfo* font) { 
+                return font && font->isValid() && font->category == category; 
+            });
+        
+        return result;
+    }
+
+    // C++17 サイズ別フォント取得（アルゴリズム使用）
+    inline std::vector<const FontInfo*> getFontsBySize(FontCategory::Size size) {
+        const auto allFonts = getAllFonts();
+        std::vector<const FontInfo*> result;
+        
+        std::copy_if(allFonts.begin(), allFonts.end(), std::back_inserter(result),
+            [size](const FontInfo* font) { 
+                return font && font->isValid() && font->size == size; 
+            });
+        
+        return result;
+    }
+
+    // C++17 日本語対応フォント取得（アルゴリズム使用）
+    inline std::vector<const FontInfo*> getJapaneseFonts() {
+        const auto allFonts = getAllFonts();
+        std::vector<const FontInfo*> result;
+        
+        std::copy_if(allFonts.begin(), allFonts.end(), std::back_inserter(result),
+            [](const FontInfo* font) { 
+                return font && font->isValid() && font->supportsJapanese; 
+            });
+        
+        return result;
+    }
+}
+
 // Font構造体の拡張
+// C++17 Font構造体（安全な参照ラッパー使用）
 struct Font
 {
     // 水平方向のテキストアライメント
@@ -1908,12 +2377,18 @@ struct Font
 
     HorizontalAlign hAlign;
     VerticalAlign vAlign;
-    const lgfx::IFont *m_fontPtr;
+    const lgfx::IFont* m_fontPtr;  // constexpr対応のためポインタ使用（安全性は設計で保証）
     float m_size = 1.0f;
+    const FontInfo* m_fontInfo = nullptr;  // constexpr対応のためポインタ使用
 
-    // コンストラクタを更新
-    Font(const lgfx::IFont &font = fonts::Font0)
+    // C++17 デフォルトコンストラクタ
+    Font(const lgfx::IFont &font = fonts::Font0) noexcept
         : m_fontPtr(&font), hAlign(HorizontalAlign::Left), vAlign(VerticalAlign::Baseline) {}
+
+    // C++17 FontInfoからのコンストラクタ
+    Font(const FontInfo& fontInfo) noexcept
+        : m_fontPtr(fontInfo.fontGetter()), hAlign(HorizontalAlign::Left), vAlign(VerticalAlign::Baseline), 
+          m_fontInfo(&fontInfo) {}
 
     // 水平アライメント設定
     Font &setHorizontalAlign(HorizontalAlign a)
@@ -1936,38 +2411,90 @@ struct Font
         return *this;
     }
 
+    // C++17 フォント情報取得（nullチェック付き）
+    [[nodiscard]] const FontInfo* getFontInfo() const noexcept {
+        return m_fontInfo;
+    }
+    
+    // C++17 フォント名取得（安全性チェック付き）
+    [[nodiscard]] String getFontName() const {
+        return (m_fontInfo && m_fontInfo->isValid()) ? 
+            String{m_fontInfo->name.data()} : 
+            String{"Unknown Font"};
+    }
+
+    // C++17 日本語対応チェック（安全性チェック付き）
+    [[nodiscard]] bool supportsJapanese() const noexcept {
+        return (m_fontInfo && m_fontInfo->isValid()) ? 
+            m_fontInfo->supportsJapanese : false;
+    }
+
+    // フォントポインタ取得（デバッグ用）
+    [[nodiscard]] const lgfx::IFont* getFontPtr() const noexcept {
+        return m_fontPtr;
+    }
+
+    // C++17 安全な描画メソッド（nullチェック付き）
     void draw(const String &text, int x, int y, const Color &color = Palette::White)
     {
+        // 安全性チェック
+        if (!m_fontPtr) return;
+        
         auto &canvas = System::getInstance().getCanvas();
+        
+        // フォントと色を設定
+        canvas.setFont(m_fontPtr);  // 日本語フォントを設定
         canvas.setTextColor(color.toRGB565());
-        canvas.setFont(m_fontPtr);
-        canvas.setTextSize(m_size);
+        canvas.setTextSize(1);  // テキストサイズは1に固定（フォント自体のサイズを使用）
+
+        // C++17 構造化束縛を使用した位置計算
+        const auto [actualX, actualY] = calculateDrawPosition(text, x, y, canvas);
+
+        // 日本語対応の描画メソッドを使用
+        canvas.drawString(text, actualX, actualY);
+    }
+
+private:
+    // C++17 構造化束縛対応の位置計算ヘルパー
+    template<typename CanvasType>
+    [[nodiscard]] std::pair<int, int> calculateDrawPosition(const String& text, int x, int y, CanvasType& canvas) const {
+        int actualX = x;
+        int actualY = y;
 
         // 水平方向のアライメント処理
-        int actualX = x;
-        if (hAlign != HorizontalAlign::Left)
-        {
-            int w = textWidth(text);
-            if (hAlign == HorizontalAlign::Center)
-                actualX = x - (w / 2);
-            else if (hAlign == HorizontalAlign::Right)
-                actualX = x - w;
+        if (hAlign != HorizontalAlign::Left) {
+            const int w = textWidth(text);
+            switch (hAlign) {
+                case HorizontalAlign::Center:
+                    actualX = x - (w / 2);
+                    break;
+                case HorizontalAlign::Right:
+                    actualX = x - w;
+                    break;
+                default:
+                    break;
+            }
         }
 
         // 垂直方向のアライメント処理
-        int actualY = y;
-        if (vAlign != VerticalAlign::Baseline)
-        {
-            int h = textHeight();
-            if (vAlign == VerticalAlign::Center)
-                actualY = y - (h / 2) / 2;
-            else if (vAlign == VerticalAlign::Bottom)
-                actualY = y - h;
-            // Top alignment uses the original y position
+        if (vAlign != VerticalAlign::Baseline) {
+            const int h = textHeight();
+            switch (vAlign) {
+                case VerticalAlign::Center:
+                    actualY = y - (h / 2) / 2;
+                    break;
+                case VerticalAlign::Bottom:
+                    actualY = y - h;
+                    break;
+                default:
+                    break;
+            }
         }
 
-        canvas.drawString(text, actualX, actualY);
+        return {actualX, actualY};
     }
+
+public:
 
     // 描画位置を指定するための構造体
     struct Pos
@@ -1985,13 +2512,19 @@ struct Font
     // テキストの幅を取得するメソッドを修正
     int textWidth(const String &text) const
     {
-        return System::getInstance().getCanvas().textWidth(text) * m_size;
+        if (!m_fontPtr) return 0;
+        auto &canvas = System::getInstance().getCanvas();
+        canvas.setFont(m_fontPtr);  // 正しいフォントを設定
+        return canvas.textWidth(text);
     }
 
     // テキストの高さを取得するメソッドを修正
     int textHeight() const
     {
-        return System::getInstance().getCanvas().fontHeight() * m_size;
+        if (!m_fontPtr) return 0;
+        auto &canvas = System::getInstance().getCanvas();
+        canvas.setFont(m_fontPtr);  // 正しいフォントを設定
+        return canvas.fontHeight();
     }
 
     // 描画領域を取得
@@ -2007,6 +2540,193 @@ struct Font
         return setHorizontalAlign(static_cast<HorizontalAlign>(a));
     }
 };
+
+// =============================================================================
+// Font Helper Functions - Easy Font Selection
+// =============================================================================
+
+namespace FontHelper
+{
+    // 簡単なフォント選択関数
+    
+    // 日本語フォント選択（サイズ指定）
+    inline Font JapaneseGothic(FontCategory::Size size = FontCategory::Size::Medium) {
+#if M5SIV3D_ENABLE_JAPANESE_FONTS
+        // 日本語フォントが有効な場合は Gothic16 を使用
+        (void)size;  // 未使用変数警告を回避
+        return Font(FontRegistry::Japanese::Gothic16);
+#else
+        // 日本語フォントが無効な場合は英語フォントで代替
+        (void)size;  // 未使用変数警告を回避
+        return Font(FontRegistry::English::FreeSans12);
+#endif
+    }
+    
+    inline Font JapaneseMincho(FontCategory::Size size = FontCategory::Size::Medium) {
+#if M5SIV3D_ENABLE_JAPANESE_FONTS
+        // 日本語フォントが有効な場合は Mincho16 を使用
+        (void)size;  // 未使用変数警告を回避
+        return Font(FontRegistry::Japanese::Mincho16);
+#else
+        // 日本語フォントが無効な場合は英語フォントで代替
+        (void)size;  // 未使用変数警告を回避
+        return Font(FontRegistry::English::FreeSerif12);
+#endif
+    }
+    
+    // 英語フォント選択（メモリ最適化対応）
+    inline Font EnglishSans(FontCategory::Size size = FontCategory::Size::Medium, FontCategory::Weight weight = FontCategory::Weight::Regular) {
+#if M5SIV3D_ENABLE_BOLD_FONTS
+        if (weight == FontCategory::Weight::Bold) {
+            switch (size) {
+                case FontCategory::Size::Small:  return Font(FontRegistry::English::FreeSansBold9);
+                case FontCategory::Size::Medium: return Font(FontRegistry::English::FreeSansBold12);
+                case FontCategory::Size::Large:  return Font(FontRegistry::English::FreeSansBold18);
+#if M5SIV3D_ENABLE_LARGE_FONTS
+                case FontCategory::Size::XLarge: return Font(FontRegistry::English::FreeSansBold24);
+#endif
+                default: return Font(FontRegistry::English::FreeSansBold12);
+            }
+        } else
+#endif
+        {
+            switch (size) {
+                case FontCategory::Size::XSmall: return Font(FontRegistry::English::Font0);
+                case FontCategory::Size::Small:  return Font(FontRegistry::English::FreeSans9);
+                case FontCategory::Size::Medium: return Font(FontRegistry::English::FreeSans12);
+                case FontCategory::Size::Large:  return Font(FontRegistry::English::FreeSans18);
+#if M5SIV3D_ENABLE_LARGE_FONTS
+                case FontCategory::Size::XLarge: return Font(FontRegistry::English::FreeSans24);
+#else
+                case FontCategory::Size::XLarge: return Font(FontRegistry::English::FreeSans18);  // フォールバック
+#endif
+                default: return Font(FontRegistry::English::FreeSans12);
+            }
+        }
+    }
+    
+    inline Font EnglishMono(FontCategory::Size size = FontCategory::Size::Medium, FontCategory::Weight weight = FontCategory::Weight::Regular) {
+#if M5SIV3D_ENABLE_BOLD_FONTS
+        if (weight == FontCategory::Weight::Bold) {
+            // Bold版のMonoフォントは定義されていないため、通常版を使用
+            switch (size) {
+                case FontCategory::Size::Small:  return Font(FontRegistry::English::FreeMono9);
+                case FontCategory::Size::Medium: return Font(FontRegistry::English::FreeMono12);
+                case FontCategory::Size::Large:  return Font(FontRegistry::English::FreeMono18);
+#if M5SIV3D_ENABLE_LARGE_FONTS
+                case FontCategory::Size::XLarge: return Font(FontRegistry::English::FreeMono18);  // 24pxがない場合は18px
+#endif
+                default: return Font(FontRegistry::English::FreeMono12);
+            }
+        } else
+#endif
+        {
+            switch (size) {
+                case FontCategory::Size::Small:  return Font(FontRegistry::English::FreeMono9);
+                case FontCategory::Size::Medium: return Font(FontRegistry::English::FreeMono12);
+                case FontCategory::Size::Large:  return Font(FontRegistry::English::FreeMono18);
+#if M5SIV3D_ENABLE_LARGE_FONTS
+                case FontCategory::Size::XLarge: return Font(FontRegistry::English::FreeMono18);  // 24pxがない場合は18px
+#else
+                case FontCategory::Size::XLarge: return Font(FontRegistry::English::FreeMono18);  // フォールバック
+#endif
+                default: return Font(FontRegistry::English::FreeMono12);
+            }
+        }
+    }
+    
+    inline Font EnglishSerif(FontCategory::Size size = FontCategory::Size::Medium) {
+        switch (size) {
+            case FontCategory::Size::Small:  return Font(FontRegistry::English::FreeSerif9);
+            case FontCategory::Size::Medium: return Font(FontRegistry::English::FreeSerif12);
+            case FontCategory::Size::Large:  return Font(FontRegistry::English::FreeSerif18);
+#if M5SIV3D_ENABLE_LARGE_FONTS
+            case FontCategory::Size::XLarge: return Font(FontRegistry::English::FreeSerif18);  // 24pxがない場合は18px
+#else
+            case FontCategory::Size::XLarge: return Font(FontRegistry::English::FreeSerif18);  // フォールバック
+#endif
+            default: return Font(FontRegistry::English::FreeSerif12);
+        }
+    }
+    
+    // 装飾フォント選択（メモリ最適化対応）
+    inline Font Decorative(const String& name) {
+#if M5SIV3D_ENABLE_DECORATIVE_FONTS
+        // 装飾フォントが有効な場合でも、実際のフォントが定義されていない場合は基本フォントを返す
+        return Font(FontRegistry::English::FreeSans12);  // フォールバック
+#else
+        // 装飾フォントが無効化されている場合は基本フォントを返す
+        (void)name;  // 未使用変数警告を回避
+        return Font(FontRegistry::English::FreeSans12);
+#endif
+    }
+    
+    // 極小フォント
+    inline Font TinyFont() {
+        return Font(FontRegistry::English::TomThumb);
+    }
+    
+    // 最適なフォント自動選択
+    inline Font AutoSelect(const String& text, FontCategory::Size preferredSize = FontCategory::Size::Medium) {
+        // 日本語文字が含まれているかチェック
+        bool hasJapanese = false;
+        for (size_t i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (static_cast<unsigned char>(c) > 127) {  // ASCII以外の文字
+                hasJapanese = true;
+                break;
+            }
+        }
+        
+        if (hasJapanese) {
+            return JapaneseGothic(preferredSize);
+        } else {
+            return EnglishSans(preferredSize);
+        }
+    }
+    
+    // フォント一覧表示用
+    inline void PrintAvailableFonts() {
+        Print << "=== Available Fonts ===";
+        
+        Print << "Japanese Fonts:";
+        for (const auto* font : FontRegistry::getJapaneseFonts()) {
+            Print << "  " << font->name;
+        }
+        
+        Print << "English Fonts:";
+        for (const auto* font : FontRegistry::getFontsByCategory(FontCategory::Type::ASCII)) {
+            Print << "  " << font->name;
+        }
+        
+        Print << "Monospace Fonts:";
+        for (const auto* font : FontRegistry::getFontsByCategory(FontCategory::Type::Monospace)) {
+            Print << "  " << font->name;
+        }
+        
+        Print << "Decorative Fonts:";
+        for (const auto* font : FontRegistry::getFontsByCategory(FontCategory::Type::Decorative)) {
+            Print << "  " << font->name;
+        }
+    }
+}
+
+// グローバル便利関数
+inline Font JapaneseFont(FontCategory::Size size = FontCategory::Size::Medium) {
+    return FontHelper::JapaneseGothic(size);
+}
+
+inline Font EnglishFont(FontCategory::Size size = FontCategory::Size::Medium) {
+    return FontHelper::EnglishSans(size);
+}
+
+inline Font MonospaceFont(FontCategory::Size size = FontCategory::Size::Medium) {
+    return FontHelper::EnglishMono(size);
+}
+
+inline Font AutoFont(const String& text, FontCategory::Size size = FontCategory::Size::Medium) {
+    return FontHelper::AutoSelect(text, size);
+}
 
 struct Bezier
 {
@@ -2940,6 +3660,173 @@ namespace SimpleGUI
 
         return changed;
     }
+
+    // フォント選択ドロップダウン
+    inline bool FontSelector(Font& selectedFont, const String& label,
+                           const Math::Vec2i& pos,
+                           FontCategory::Type category = FontCategory::Type::ASCII,
+                           int32_t width = DefaultStyle.DefaultWidth * 2,
+                           bool enabled = true)
+    {
+        static bool isOpen = false;
+        static FontCategory::Type currentCategory = category;
+        bool changed = false;
+        static constexpr int32_t cornerRadius = 4;
+
+        // 現在選択されているフォント名を取得
+        String currentFontName = selectedFont.getFontInfo() ? 
+            String(selectedFont.getFontInfo()->name.data()) : 
+            String("Default Font");
+
+        // メインボタンの描画
+        Rect mainButton(pos.x, pos.y, width, DefaultStyle.DefaultHeight);
+        
+        if (enabled) {
+            if (mainButton.released()) {
+                isOpen = !isOpen;
+                currentCategory = category;
+            }
+            
+            if (mainButton.touchOver()) {
+                mainButton.drawRound(cornerRadius, Color(
+                    Math::lerp(DefaultStyle.BackgroundColor.r, DefaultStyle.ActiveColor.r, 0.3),
+                    Math::lerp(DefaultStyle.BackgroundColor.g, DefaultStyle.ActiveColor.g, 0.3),
+                    Math::lerp(DefaultStyle.BackgroundColor.b, DefaultStyle.ActiveColor.b, 0.3)
+                ));
+            } else {
+                mainButton.drawRound(cornerRadius, DefaultStyle.BackgroundColor);
+            }
+            mainButton.drawRoundFrame(cornerRadius, DefaultStyle.TextColor);
+        } else {
+            mainButton.drawRound(cornerRadius, DefaultStyle.DisabledColor);
+            mainButton.drawRoundFrame(cornerRadius, Color(160, 160, 160));
+        }
+
+        // ラベルとフォント名の描画
+        auto& font = detail::GetFont();
+        font.setHorizontalAlign(Font::HorizontalAlign::Left)
+            .setVerticalAlign(Font::VerticalAlign::Center);
+            
+        font(label + ": " + currentFontName, Font::Pos(
+            pos.x + DefaultStyle.DefaultPadding,
+            pos.y + DefaultStyle.DefaultHeight/2
+        ), enabled ? DefaultStyle.TextColor : DefaultStyle.DisabledColor);
+
+        // ドロップダウン矢印
+        const int32_t arrowX = pos.x + width - 20;
+        const int32_t arrowY = pos.y + DefaultStyle.DefaultHeight/2;
+        if (isOpen) {
+            Triangle(arrowX, arrowY - 3, arrowX + 6, arrowY + 3, arrowX - 6, arrowY + 3)
+                .draw(enabled ? DefaultStyle.TextColor : DefaultStyle.DisabledColor);
+        } else {
+            Triangle(arrowX, arrowY + 3, arrowX + 6, arrowY - 3, arrowX - 6, arrowY - 3)
+                .draw(enabled ? DefaultStyle.TextColor : DefaultStyle.DisabledColor);
+        }
+
+        // ドロップダウンリストの描画
+        if (isOpen && enabled) {
+            auto fonts = FontRegistry::getFontsByCategory(currentCategory);
+            const int32_t itemHeight = DefaultStyle.DefaultHeight;
+            const int32_t listHeight = Math::min(static_cast<int32_t>(fonts.size()) * itemHeight, 200);
+            
+            Rect listBackground(pos.x, pos.y + DefaultStyle.DefaultHeight + 2, width, listHeight);
+            listBackground.drawRound(cornerRadius, DefaultStyle.BackgroundColor);
+            listBackground.drawRoundFrame(cornerRadius, DefaultStyle.TextColor);
+
+            for (size_t i = 0; i < fonts.size() && i * itemHeight < listHeight; ++i) {
+                Rect itemRect(pos.x + 2, 
+                            pos.y + DefaultStyle.DefaultHeight + 4 + i * itemHeight, 
+                            width - 4, 
+                            itemHeight - 2);
+
+                if (itemRect.touchOver()) {
+                    itemRect.drawRound(cornerRadius - 1, DefaultStyle.ActiveColor);
+                    
+                    if (itemRect.released()) {
+                        // C++17 安全性チェック付きアクセス
+                        if (fonts[i] && fonts[i]->isValid()) {
+                            selectedFont = Font(*fonts[i]);
+                            isOpen = false;
+                            changed = true;
+                        }
+                    }
+                }
+
+                font.setHorizontalAlign(Font::HorizontalAlign::Left)
+                    .setVerticalAlign(Font::VerticalAlign::Center);
+                    
+                // C++17 安全性チェック付きアクセス
+                if (fonts[i] && fonts[i]->isValid()) {
+                    font(String{fonts[i]->name.data()}, Font::Pos(
+                        itemRect.m_x + DefaultStyle.DefaultPadding,
+                        itemRect.m_y + itemHeight/2
+                    ), itemRect.touchOver() ? Palette::White : DefaultStyle.TextColor);
+                }
+            }
+        }
+
+        return changed;
+    }
+
+    // 簡単なフォントサイズ選択
+    inline bool FontSizeSelector(FontCategory::Size& selectedSize, const String& label,
+                                const Math::Vec2i& pos,
+                                int32_t width = DefaultStyle.DefaultWidth,
+                                bool enabled = true)
+    {
+        static const char* sizeNames[] = {"XSmall", "Small", "Medium", "Large", "XLarge", "XXLarge"};
+        static size_t currentIndex = static_cast<size_t>(selectedSize);
+        
+        std::vector<String> options;
+        for (const auto& name : sizeNames) {
+            options.emplace_back(name);
+        }
+        
+        bool changed = RadioButtons(currentIndex, options, pos, width, enabled);
+        
+        if (changed) {
+            selectedSize = static_cast<FontCategory::Size>(currentIndex);
+        }
+        
+        return changed;
+    }
+
+    // フォントプレビュー
+    inline void FontPreview(const Font& font, const String& previewText,
+                          const Math::Vec2i& pos,
+                          int32_t width = DefaultStyle.DefaultWidth * 2,
+                          int32_t height = DefaultStyle.DefaultHeight * 2)
+    {
+        static constexpr int32_t cornerRadius = 4;
+        
+        Rect previewArea(pos.x, pos.y, width, height);
+        previewArea.drawRound(cornerRadius, Palette::White);
+        previewArea.drawRoundFrame(cornerRadius, DefaultStyle.TextColor);
+
+        // プレビューテキストの描画
+        Font previewFont = font;
+        previewFont.setHorizontalAlign(Font::HorizontalAlign::Center)
+                   .setVerticalAlign(Font::VerticalAlign::Center);
+                   
+        previewFont(previewText, Font::Pos(
+            pos.x + width/2,
+            pos.y + height/2
+        ), DefaultStyle.TextColor);
+
+        // C++17 フォント情報の表示（安全性チェック付き）
+        if (const auto fontInfo = font.getFontInfo(); fontInfo && fontInfo->isValid()) {
+            auto& infoFont = detail::GetFont();
+            infoFont.setHorizontalAlign(Font::HorizontalAlign::Left)
+                   .setVerticalAlign(Font::VerticalAlign::Bottom);
+                   
+            infoFont(String{"Font: "} + font.getFontName(), Font::Pos(
+                pos.x + DefaultStyle.DefaultPadding,
+                pos.y + height - DefaultStyle.DefaultPadding
+            ), Color(100, 100, 100));
+        }
+    }
+
+
 }
 
 // デフォルトはモダンスタイル
@@ -3744,3 +4631,315 @@ inline void Input::InputManager::update() {
     Input::SafeDialRFID::getInstance().update();
 #endif
 }
+
+// =============================================================================
+// フォントカテゴリ（メモリ最適化対応）
+// =============================================================================
+
+// =============================================================================
+// C++17 エレガントなフォント管理システム
+// =============================================================================
+
+namespace FontSystem {
+    // C++17 フォント取得関数型（型安全）
+    using FontProvider = std::function<const lgfx::IFont*()>;
+    
+    // C++17 optional を使った安全なフォント情報
+    struct FontDescriptor {
+        std::string_view name;
+        FontCategory::Type category;
+        FontCategory::Weight weight;
+        FontCategory::Style style;
+        FontCategory::Size size;
+        uint8_t pixelHeight;
+        bool supportsJapanese;
+        
+        // C++17 constexpr コンストラクタ
+        constexpr FontDescriptor(std::string_view n, FontCategory::Type cat, 
+                               FontCategory::Weight w, FontCategory::Style st, 
+                               FontCategory::Size sz, uint8_t height, 
+                               bool japanese = false) noexcept
+            : name(n), category(cat), weight(w), style(st), 
+              size(sz), pixelHeight(height), supportsJapanese(japanese) {}
+    };
+    
+    // C++17 フォントハンドル（RAII + 型安全）
+    class FontHandle {
+    private:
+        FontProvider m_provider;
+        FontDescriptor m_descriptor;
+        mutable std::optional<const lgfx::IFont*> m_cachedFont;
+        
+    public:
+        // C++17 perfect forwarding constructor
+        template<typename Provider>
+        constexpr FontHandle(Provider&& provider, const FontDescriptor& desc) noexcept
+            : m_provider(std::forward<Provider>(provider)), m_descriptor(desc) {}
+        
+        // C++17 optional を使った安全なフォント取得（ESP32対応：例外なし）
+        [[nodiscard]] std::optional<const lgfx::IFont*> tryGetFont() const noexcept {
+            if (!m_cachedFont.has_value()) {
+                if (m_provider) {
+                    auto* font = m_provider();
+                    if (font != nullptr) {
+                        m_cachedFont = font;
+                    } else {
+                        return std::nullopt;
+                    }
+                } else {
+                    return std::nullopt;
+                }
+            }
+            return m_cachedFont;
+        }
+        
+        // C++17 constexpr if を使った安全なアクセス
+        [[nodiscard]] const lgfx::IFont& getFont() const noexcept {
+            if constexpr (std::is_same_v<decltype(tryGetFont()), std::optional<const lgfx::IFont*>>) {
+                auto font = tryGetFont();
+                if (font.has_value() && font.value() != nullptr) {
+                    return *font.value();
+                }
+            }
+            // フォールバック: 基本フォント
+            return fonts::Font2;
+        }
+        
+        // C++17 structured bindings サポート
+        [[nodiscard]] constexpr const FontDescriptor& getDescriptor() const noexcept {
+            return m_descriptor;
+        }
+        
+        // C++17 constexpr アクセサ
+        [[nodiscard]] constexpr std::string_view getName() const noexcept { return m_descriptor.name; }
+        [[nodiscard]] constexpr FontCategory::Type getCategory() const noexcept { return m_descriptor.category; }
+        [[nodiscard]] constexpr bool supportsJapanese() const noexcept { return m_descriptor.supportsJapanese; }
+        [[nodiscard]] constexpr uint8_t getPixelHeight() const noexcept { return m_descriptor.pixelHeight; }
+        
+        // C++17 explicit bool conversion
+        [[nodiscard]] explicit operator bool() const noexcept {
+            return tryGetFont().has_value();
+        }
+    };
+    
+    // C++17 constexpr if を使ったフォントファクトリ
+    template<bool EnableJapanese = M5SIV3D_ENABLE_JAPANESE_FONTS,
+             bool EnableLarge = M5SIV3D_ENABLE_LARGE_FONTS,
+             bool EnableBold = M5SIV3D_ENABLE_BOLD_FONTS,
+             bool EnableDecorative = M5SIV3D_ENABLE_DECORATIVE_FONTS>
+    class FontFactory {
+    public:
+        // C++17 constexpr if による条件付きフォント作成
+        [[nodiscard]] static constexpr auto createJapaneseGothic(FontCategory::Size size) noexcept {
+            if constexpr (EnableJapanese) {
+                switch (size) {
+                    case FontCategory::Size::XSmall:
+                        return FontHandle([]() { return &fonts::efontJA_10; },
+                                        FontDescriptor("Japanese Gothic 10px", FontCategory::Type::Japanese,
+                                                     FontCategory::Weight::Regular, FontCategory::Style::Normal,
+                                                     FontCategory::Size::XSmall, 10, true));
+                    case FontCategory::Size::Small:
+                        return FontHandle([]() { return &fonts::efontJA_12; },
+                                        FontDescriptor("Japanese Gothic 12px", FontCategory::Type::Japanese,
+                                                     FontCategory::Weight::Regular, FontCategory::Style::Normal,
+                                                     FontCategory::Size::Small, 12, true));
+                    case FontCategory::Size::Medium:
+                        return FontHandle([]() { return &fonts::efontJA_16; },
+                                        FontDescriptor("Japanese Gothic 16px", FontCategory::Type::Japanese,
+                                                     FontCategory::Weight::Regular, FontCategory::Style::Normal,
+                                                     FontCategory::Size::Medium, 16, true));
+                    case FontCategory::Size::Large:
+                        return FontHandle([]() { return &fonts::efontJA_24; },
+                                        FontDescriptor("Japanese Gothic 24px", FontCategory::Type::Japanese,
+                                                     FontCategory::Weight::Regular, FontCategory::Style::Normal,
+                                                     FontCategory::Size::Large, 24, true));
+                    default:
+                        return createFallbackFont();
+                }
+            } else {
+                return createFallbackFont();
+            }
+        }
+        
+        // C++17 auto return type deduction
+        [[nodiscard]] static auto createEnglishSans(FontCategory::Size size, FontCategory::Weight weight = FontCategory::Weight::Regular) noexcept {
+            if constexpr (EnableBold && weight == FontCategory::Weight::Bold) {
+                switch (size) {
+                    case FontCategory::Size::Small:
+                        return FontHandle([]() { return &fonts::FreeSansBold9pt7b; },
+                                        FontDescriptor("FreeSans Bold 9pt", FontCategory::Type::ASCII,
+                                                     FontCategory::Weight::Bold, FontCategory::Style::Normal,
+                                                     FontCategory::Size::Small, 9, false));
+                    case FontCategory::Size::Medium:
+                        return FontHandle([]() { return &fonts::FreeSansBold12pt7b; },
+                                        FontDescriptor("FreeSans Bold 12pt", FontCategory::Type::ASCII,
+                                                     FontCategory::Weight::Bold, FontCategory::Style::Normal,
+                                                     FontCategory::Size::Medium, 12, false));
+                    default:
+                        return createBasicFont(size);
+                }
+            } else {
+                switch (size) {
+                    case FontCategory::Size::Small:
+                        return FontHandle([]() { return &fonts::FreeSans9pt7b; },
+                                        FontDescriptor("FreeSans 9pt", FontCategory::Type::ASCII,
+                                                     FontCategory::Weight::Regular, FontCategory::Style::Normal,
+                                                     FontCategory::Size::Small, 9, false));
+                    case FontCategory::Size::Medium:
+                        return FontHandle([]() { return &fonts::FreeSans12pt7b; },
+                                        FontDescriptor("FreeSans 12pt", FontCategory::Type::ASCII,
+                                                     FontCategory::Weight::Regular, FontCategory::Style::Normal,
+                                                     FontCategory::Size::Medium, 12, false));
+                    default:
+                        return createBasicFont(size);
+                }
+            }
+        }
+        
+        // C++17 基本フォント（常に利用可能）
+        [[nodiscard]] static constexpr auto createBasicFont(FontCategory::Size size) noexcept {
+            switch (size) {
+                case FontCategory::Size::XSmall:
+                    return FontHandle([]() { return &fonts::TomThumb; },
+                                    FontDescriptor("TomThumb", FontCategory::Type::ASCII,
+                                                 FontCategory::Weight::Regular, FontCategory::Style::Normal,
+                                                 FontCategory::Size::XSmall, 5, false));
+                case FontCategory::Size::Small:
+                    return FontHandle([]() { return &fonts::Font2; },
+                                    FontDescriptor("Font2", FontCategory::Type::ASCII,
+                                                 FontCategory::Weight::Regular, FontCategory::Style::Normal,
+                                                 FontCategory::Size::Small, 8, false));
+                case FontCategory::Size::Medium:
+                    return FontHandle([]() { return &fonts::Font4; },
+                                    FontDescriptor("Font4", FontCategory::Type::ASCII,
+                                                 FontCategory::Weight::Regular, FontCategory::Style::Normal,
+                                                 FontCategory::Size::Medium, 16, false));
+                default:
+                    return FontHandle([]() { return &fonts::Font2; },
+                                    FontDescriptor("Font2 (Fallback)", FontCategory::Type::ASCII,
+                                                 FontCategory::Weight::Regular, FontCategory::Style::Normal,
+                                                 FontCategory::Size::Small, 8, false));
+            }
+        }
+        
+    private:
+        [[nodiscard]] static constexpr auto createFallbackFont() noexcept {
+            return FontHandle([]() { return &fonts::Font2; },
+                            FontDescriptor("Font2 (Fallback)", FontCategory::Type::ASCII,
+                                         FontCategory::Weight::Regular, FontCategory::Style::Normal,
+                                         FontCategory::Size::Small, 8, false));
+        }
+    };
+    
+    // C++17 フォントレジストリ（型安全なコンテナ）
+    class FontRegistry {
+    private:
+        using FontMap = std::unordered_map<std::string, FontHandle>;
+        static inline FontMap s_fonts; // C++17 inline static
+        
+    public:
+        // C++17 perfect forwarding
+        template<typename... Args>
+        static void registerFont(std::string_view name, Args&&... args) {
+            s_fonts.emplace(std::string(name), FontHandle(std::forward<Args>(args)...));
+        }
+        
+        // C++17 optional を使った安全な検索
+        [[nodiscard]] static std::optional<FontHandle> findFont(std::string_view name) noexcept {
+            auto it = s_fonts.find(std::string(name));
+            if (it != s_fonts.end()) {
+                return it->second;
+            }
+            return std::nullopt;
+        }
+        
+        // C++17 structured bindings 対応
+        [[nodiscard]] static auto getAllFonts() noexcept {
+            std::vector<std::pair<std::string_view, const FontHandle*>> result;
+            result.reserve(s_fonts.size());
+            
+            for (const auto& [name, handle] : s_fonts) {
+                result.emplace_back(name, &handle);
+            }
+            return result;
+        }
+        
+        // C++17 constexpr if による条件付き初期化
+        static void initializeDefaultFonts() noexcept {
+            using Factory = FontFactory<>;
+            
+            // 基本フォント（常に利用可能）
+            registerFont("basic_tiny", Factory::createBasicFont(FontCategory::Size::XSmall));
+            registerFont("basic_small", Factory::createBasicFont(FontCategory::Size::Small));
+            registerFont("basic_medium", Factory::createBasicFont(FontCategory::Size::Medium));
+            
+            // 条件付きフォント
+            if constexpr (M5SIV3D_ENABLE_JAPANESE_FONTS) {
+                registerFont("japanese_gothic_small", Factory::createJapaneseGothic(FontCategory::Size::Small));
+                registerFont("japanese_gothic_medium", Factory::createJapaneseGothic(FontCategory::Size::Medium));
+                registerFont("japanese_gothic_large", Factory::createJapaneseGothic(FontCategory::Size::Large));
+            }
+            
+            // 英語フォント
+            registerFont("english_sans_small", Factory::createEnglishSans(FontCategory::Size::Small));
+            registerFont("english_sans_medium", Factory::createEnglishSans(FontCategory::Size::Medium));
+            
+            if constexpr (M5SIV3D_ENABLE_BOLD_FONTS) {
+                registerFont("english_sans_bold_small", Factory::createEnglishSans(FontCategory::Size::Small, FontCategory::Weight::Bold));
+                registerFont("english_sans_bold_medium", Factory::createEnglishSans(FontCategory::Size::Medium, FontCategory::Weight::Bold));
+            }
+        }
+    };
+}
+
+// C++17 互換性のための旧API（レガシーサポート）
+struct FontInfo {
+    using FontGetter = std::function<const lgfx::IFont*()>;
+    
+    FontGetter fontGetter;
+    std::string_view name;
+    FontCategory::Type category;
+    FontCategory::Weight weight;
+    FontCategory::Style style;
+    FontCategory::Size size;
+    uint8_t pixelHeight;
+    bool supportsJapanese;
+
+    // C++17 FontHandle からの変換コンストラクタ
+    FontInfo(const FontSystem::FontHandle& handle) noexcept
+        : fontGetter([&handle]() { return &handle.getFont(); }),
+          name(handle.getName()),
+          category(handle.getCategory()),
+          weight(handle.getDescriptor().weight),
+          style(handle.getDescriptor().style),
+          size(handle.getDescriptor().size),
+          pixelHeight(handle.getPixelHeight()),
+          supportsJapanese(handle.supportsJapanese()) {}
+          
+    // 従来のコンストラクタ（後方互換性）
+    constexpr FontInfo(FontGetter getter, std::string_view n, 
+                      FontCategory::Type cat, FontCategory::Weight w, 
+                      FontCategory::Style st, FontCategory::Size sz, 
+                      uint8_t height, bool japanese = false) noexcept
+        : fontGetter(std::move(getter)), name(n), category(cat), weight(w), style(st), 
+          size(sz), pixelHeight(height), supportsJapanese(japanese) {}
+          
+    // C++17 安全なアクセサ
+    [[nodiscard]] const lgfx::IFont& getFont() const noexcept { 
+        if (fontGetter) {
+            auto* font = fontGetter();
+            if (font != nullptr) {
+                return *font;
+            }
+        }
+        return fonts::Font2; // フォールバック
+    }
+    
+    [[nodiscard]] const lgfx::IFont* getFontPtr() const noexcept {
+        return fontGetter ? fontGetter() : &fonts::Font2;
+    }
+    
+    [[nodiscard]] bool isValid() const noexcept {
+        return static_cast<bool>(fontGetter);
+    }
+};
