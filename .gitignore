@@ -1,2 +1,10 @@
 .pio/
-.pio/**
+.pioenvs/
+.piolibdeps/
+.vscode/
+venv/
+__pycache__/
+*.pyc
+*.o
+*.a
+*.exe
