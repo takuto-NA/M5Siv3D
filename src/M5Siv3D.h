@@ -1294,7 +1294,7 @@ namespace Input
     SafeDialEncoder& getDialEncoder() { return SafeDialEncoder::getInstance(); }
     SafeDialRFID& getDialRFID() { return SafeDialRFID::getInstance(); }
     
-    #define Encoder getDialEncoder()
+    // #define Encoder getDialEncoder()
     #define RFID getDialRFID()
 
 #else
@@ -1336,7 +1336,7 @@ namespace Input
     SafeDummyEncoder& getDummyEncoder() { return SafeDummyEncoder::getInstance(); }
     SafeDummyRFID& getDummyRFID() { return SafeDummyRFID::getInstance(); }
     
-    #define Encoder getDummyEncoder()
+    // #define Encoder getDummyEncoder()
     #define RFID getDummyRFID()
 
 #endif
