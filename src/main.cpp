@@ -39,9 +39,26 @@ int32_t g_systemHealth = 0; // 0: OK, 1: FAULT
 int32_t g_scrollIndex = 0;   // エンコーダーで操作するスクロール位置
 constexpr int32_t kMaxVisibleMotors = 5;
 
+enum class DisplayMode {
+    BodyDashboard, // 概要（Pip-boy風）
+    MotorList      // 詳細リスト
+};
+DisplayMode g_displayMode = DisplayMode::BodyDashboard;
+
 // レイアウト定数
 constexpr int32_t kHeaderHeight = 45;
 constexpr int32_t kRowHeight = 30;
+
+// ボディダッシュボード用座標 (身体の部位ごとの配置)
+struct BodyPos {
+    int16_t x, y;
+};
+const BodyPos g_bodyCoords[] = {
+    {120, 140}, {120, 150}, {120, 130}, // HipL, HipR, HipTwist (Spine)
+    {120, 80},  {120, 70},  {120, 90}, {120, 60}, // NeckL, NeckR, NeckTwist, Eyelid (Head)
+    {100, 110}, {90, 120}, {80, 130}, {70, 140}, {60, 150}, {50, 160}, {40, 170}, // LeftArm 01-07
+    {140, 110}, {150, 120}, {160, 130}, {170, 140}, {180, 150}, {190, 160}, {200, 170} // RightArm 01-07
+};
 
 void drawHeader(int32_t centerX) {
     const Color healthColor = (g_systemHealth == 0) ? Palette::Green : Palette::Red;
@@ -49,9 +66,40 @@ void drawHeader(int32_t centerX) {
 
     Font().setHorizontalAlign(Font::HorizontalAlign::Center)
           .setSize(2)
-          (healthText, Font::Pos(centerX, 30), healthColor);
+          (healthText, Font::Pos(centerX, 25), healthColor);
     
-    Line(0, kHeaderHeight, System::Width(), kHeaderHeight).draw(Palette::Gray);
+    String modeName = (g_displayMode == DisplayMode::BodyDashboard) ? "[OVERVIEW]" : "[DETAIL]";
+    Font().setHorizontalAlign(Font::HorizontalAlign::Center)
+          .setSize(1)
+          (modeName, Font::Pos(centerX, 45), Palette::Gray);
+}
+
+void drawBodyDashboard() {
+    // ボディダッシュボード（Pip-boy風）の描画
+    const int32_t cx = System::Width() / 2;
+
+    // 身体のメインライン（Spine）
+    Line(cx, 70, cx, 150).draw(Color(0, 100, 0));
+    // 肩ライン
+    Line(cx - 40, 110, cx + 40, 110).draw(Color(0, 100, 0));
+
+    for (size_t i = 0; i < g_motors.size(); ++i) {
+        const auto& motor = g_motors[i];
+        const auto& pos = g_bodyCoords[i];
+        
+        // モーターの状態色
+        Color dotColor;
+        if (!motor.updated) dotColor = Color(60, 0, 0); // スタール
+        else if (g_systemHealth != 0) dotColor = Palette::Red; // システム異常
+        else dotColor = Palette::Green; // 正常
+        
+        // モーターを矩形で表示
+        Rect(pos.x - 3, pos.y - 3, 6, 6).draw(dotColor);
+        if (motor.updated) {
+            // アクティブなモーターは白い枠で強調
+            Rect(pos.x - 3, pos.y - 3, 6, 6).drawFrame(Palette::White);
+        }
+    }
 }
 
 void drawMotorList(int32_t centerX) {
@@ -137,28 +185,43 @@ void Main() {
         // MsgPacketizer の更新
         MsgPacketizer::update();
 
-        // エンコーダーでスクロール
-        const long encoderDelta = Input::getDialEncoder().getDelta().value_or(0);
-        if (encoderDelta != 0) {
-            g_scrollIndex = Math::clamp((int32_t)(g_scrollIndex + encoderDelta), 0, (int32_t)g_motors.size() - kMaxVisibleMotors);
+        // モード切り替え（ボタンA長押し、またはダブルクリックの代わりに「特定の秒数」で判定も可能ですが、
+        // 今回はボタンAの「離した瞬間」で切り替えるようにします）
+        if (Input::getButtonA().released()) {
+            if (g_displayMode == DisplayMode::BodyDashboard) g_displayMode = DisplayMode::MotorList;
+            else g_displayMode = DisplayMode::BodyDashboard;
         }
 
-        // ボタンAでリセットコマンド送信
-        if (Input::getButtonA().pressed()) {
+        // エンコーダーで操作
+        const long encoderDelta = Input::getDialEncoder().getDelta().value_or(0);
+        if (encoderDelta != 0) {
+            if (g_displayMode == DisplayMode::MotorList) {
+                // 詳細リスト時はスクロール
+                g_scrollIndex = Math::clamp((int32_t)(g_scrollIndex + encoderDelta), 0, (int32_t)g_motors.size() - kMaxVisibleMotors);
+            }
+        }
+
+        // 長押しでリセットコマンド送信 (ここでは簡易的にpressedDurationを使用)
+        if (Input::getButtonA().pressedDuration(1000)) {
             MsgPacketizer::send(Serial2, kIndexCommand, String("CLEAR_FAULTS"));
-            // 視覚的フィードバック（中心に円を描画）
             Circle(System::Width()/2, System::Height()/2, 20).draw(Palette::Orange);
         }
 
         // 描画
         const int32_t centerX = System::Width() / 2;
         drawHeader(centerX);
-        drawMotorList(centerX);
+        
+        if (g_displayMode == DisplayMode::BodyDashboard) {
+            drawBodyDashboard();
+        } else {
+            drawMotorList(centerX);
+        }
 
-        // デバッグ情報（受信バイト数表示を削除し、本来のヘルプを表示）
+        // ヘルプ
+        String helpText = (g_displayMode == DisplayMode::BodyDashboard) ? "BtnA: Detail Mode" : "BtnA: Overview / Dial: Scroll";
         Font().setHorizontalAlign(Font::HorizontalAlign::Center)
               .setSize(1)
-              ("BtnA: Clear Faults", Font::Pos(centerX, System::Height() - 15), Palette::Gray);
+              (helpText, Font::Pos(centerX, System::Height() - 15), Palette::Gray);
 
         ClearPrint();
         drawPrint();
