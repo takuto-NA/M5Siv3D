@@ -54,51 +54,66 @@ struct BodyPos {
     int16_t x, y;
 };
 const BodyPos g_bodyCoords[] = {
-    {120, 140}, {120, 150}, {120, 130}, // HipL, HipR, HipTwist (Spine)
-    {120, 80},  {120, 70},  {120, 90}, {120, 60}, // NeckL, NeckR, NeckTwist, Eyelid (Head)
-    {100, 110}, {90, 120}, {80, 130}, {70, 140}, {60, 150}, {50, 160}, {40, 170}, // LeftArm 01-07
-    {140, 110}, {150, 120}, {160, 130}, {170, 140}, {180, 150}, {190, 160}, {200, 170} // RightArm 01-07
+    {135, 180}, {105, 180}, {120, 160}, // 0:HipL(右), 1:HipR(左), 2:HipTwist(上)
+    {130, 85},  {110, 85},  {120, 70}, {120, 55}, // 3:NeckL, 4:NeckR, 5:NeckTwist, 6:Eyelid(最上部)
+    {90, 110}, {80, 120}, {70, 130}, {60, 140}, {50, 150}, {40, 160}, {30, 170}, // LeftArm 01-07 (左)
+    {150, 110}, {160, 120}, {170, 130}, {180, 140}, {190, 150}, {200, 160}, {210, 170} // RightArm 01-07 (右)
 };
 
 void drawHeader(int32_t centerX) {
-    const Color healthColor = (g_systemHealth == 0) ? Palette::Green : Palette::Red;
+    const Color pipGreen = Color(30, 255, 30);
+    const Color healthColor = (g_systemHealth == 0) ? pipGreen : Palette::Red;
     const String healthText = (g_systemHealth == 0) ? "SYSTEM: OK" : "SYSTEM: FAULT";
+
+    // 背景の薄いグリッド (透過の代わりに暗い色で)
+    for (int i = 0; i < 240; i += 40) {
+        Line(i, 0, i, 240).draw(Color(0, 30, 0));
+        Line(0, i, 240, i).draw(Color(0, 30, 0));
+    }
 
     Font().setHorizontalAlign(Font::HorizontalAlign::Center)
           .setSize(2)
           (healthText, Font::Pos(centerX, 25), healthColor);
     
-    String modeName = (g_displayMode == DisplayMode::BodyDashboard) ? "[OVERVIEW]" : "[DETAIL]";
+    String modeName = (g_displayMode == DisplayMode::BodyDashboard) ? "-- STATUS OVERVIEW --" : "-- SENSOR DETAIL --";
     Font().setHorizontalAlign(Font::HorizontalAlign::Center)
           .setSize(1)
-          (modeName, Font::Pos(centerX, 45), Palette::Gray);
+          (modeName, Font::Pos(centerX, 45), pipGreen);
 }
 
 void drawBodyDashboard() {
-    // ボディダッシュボード（Pip-boy風）の描画
-    const int32_t cx = System::Width() / 2;
+    const int32_t cx = 120;
+    const Color pipDarkGreen = Color(0, 100, 0);
+    const Color pipBrightGreen = Color(30, 255, 30);
 
-    // 身体のメインライン（Spine）
-    Line(cx, 70, cx, 150).draw(Color(0, 100, 0));
-    // 肩ライン
-    Line(cx - 40, 110, cx + 40, 110).draw(Color(0, 100, 0));
+    // 骨格ライン（Pip-boy風）
+    Line(cx, 70, cx, 160).draw(pipDarkGreen); 
+    Line(cx-30, 110, cx+30, 110).draw(pipDarkGreen); 
+    Line(cx, 160, g_bodyCoords[0].x, g_bodyCoords[0].y).draw(pipDarkGreen);
+    Line(cx, 160, g_bodyCoords[1].x, g_bodyCoords[1].y).draw(pipDarkGreen);
+
+    // コーナーデコレーション
+    int32_t d = 15;
+    Line(20, 20, 20+d, 20).draw(pipBrightGreen);
+    Line(20, 20, 20, 20+d).draw(pipBrightGreen);
+    Line(220, 220, 220-d, 220).draw(pipBrightGreen);
+    Line(220, 220, 220, 220-d).draw(pipBrightGreen);
 
     for (size_t i = 0; i < g_motors.size(); ++i) {
         const auto& motor = g_motors[i];
         const auto& pos = g_bodyCoords[i];
         
-        // モーターの状態色
         Color dotColor;
-        if (!motor.updated) dotColor = Color(60, 0, 0); // スタール
-        else if (g_systemHealth != 0) dotColor = Palette::Red; // システム異常
-        else dotColor = Palette::Green; // 正常
+        if (!motor.updated) dotColor = Color(80, 20, 20); 
+        else if (g_systemHealth != 0) dotColor = Palette::Red;
+        else dotColor = pipBrightGreen;
         
-        // モーターを矩形で表示
-        Rect(pos.x - 3, pos.y - 3, 6, 6).draw(dotColor);
+        // ジョイントの描画
         if (motor.updated) {
-            // アクティブなモーターは白い枠で強調
-            Rect(pos.x - 3, pos.y - 3, 6, 6).drawFrame(Palette::White);
+            float pulse = (float)sin(millis() * 0.005f) * 2.0f;
+            Circle(pos.x, pos.y, 4 + (int32_t)abs(pulse)).drawFrame(pipBrightGreen);
         }
+        Rect(pos.x - 2, pos.y - 2, 4, 4).draw(dotColor);
     }
 }
 
@@ -185,8 +200,7 @@ void Main() {
         // MsgPacketizer の更新
         MsgPacketizer::update();
 
-        // モード切り替え（ボタンA長押し、またはダブルクリックの代わりに「特定の秒数」で判定も可能ですが、
-        // 今回はボタンAの「離した瞬間」で切り替えるようにします）
+        // モード切り替え（ボタンAを離した瞬間）
         if (Input::getButtonA().released()) {
             if (g_displayMode == DisplayMode::BodyDashboard) g_displayMode = DisplayMode::MotorList;
             else g_displayMode = DisplayMode::BodyDashboard;
@@ -201,7 +215,7 @@ void Main() {
             }
         }
 
-        // 長押しでリセットコマンド送信 (ここでは簡易的にpressedDurationを使用)
+        // 長押しでリセットコマンド送信
         if (Input::getButtonA().pressedDuration(1000)) {
             MsgPacketizer::send(Serial2, kIndexCommand, String("CLEAR_FAULTS"));
             Circle(System::Width()/2, System::Height()/2, 20).draw(Palette::Orange);
