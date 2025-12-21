@@ -39,6 +39,10 @@ Circle(160, 120, 30).draw(Palette::Blue);
 }
 ```
 
+## Troubleshooting
+
+- See `docs/Troubleshooting.md`
+
 
 ## License
 
