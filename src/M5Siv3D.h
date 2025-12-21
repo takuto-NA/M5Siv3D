@@ -4640,6 +4640,15 @@ inline void Input::InputManager::update() {
 // C++17 エレガントなフォント管理システム
 // =============================================================================
 
+// =============================================================================
+// FontSystem (experimental)
+//
+// NOTE:
+// 現状の FontSystem は API/設計が未整理で、テンプレート/if constexpr の条件が不正になり
+// コンパイルエラーを起こすため、一旦無効化します。
+// 既存の `FontInfo` + `FontRegistry`（このヘッダ前半）を使用してください。
+// =============================================================================
+#if 0
 namespace FontSystem {
     // C++17 フォント取得関数型（型安全）
     using FontProvider = std::function<const lgfx::IFont*()>;
@@ -4891,55 +4900,8 @@ namespace FontSystem {
         }
     };
 }
+#endif
 
-// C++17 互換性のための旧API（レガシーサポート）
-struct FontInfo {
-    using FontGetter = std::function<const lgfx::IFont*()>;
-    
-    FontGetter fontGetter;
-    std::string_view name;
-    FontCategory::Type category;
-    FontCategory::Weight weight;
-    FontCategory::Style style;
-    FontCategory::Size size;
-    uint8_t pixelHeight;
-    bool supportsJapanese;
-
-    // C++17 FontHandle からの変換コンストラクタ
-    FontInfo(const FontSystem::FontHandle& handle) noexcept
-        : fontGetter([&handle]() { return &handle.getFont(); }),
-          name(handle.getName()),
-          category(handle.getCategory()),
-          weight(handle.getDescriptor().weight),
-          style(handle.getDescriptor().style),
-          size(handle.getDescriptor().size),
-          pixelHeight(handle.getPixelHeight()),
-          supportsJapanese(handle.supportsJapanese()) {}
-          
-    // 従来のコンストラクタ（後方互換性）
-    constexpr FontInfo(FontGetter getter, std::string_view n, 
-                      FontCategory::Type cat, FontCategory::Weight w, 
-                      FontCategory::Style st, FontCategory::Size sz, 
-                      uint8_t height, bool japanese = false) noexcept
-        : fontGetter(std::move(getter)), name(n), category(cat), weight(w), style(st), 
-          size(sz), pixelHeight(height), supportsJapanese(japanese) {}
-          
-    // C++17 安全なアクセサ
-    [[nodiscard]] const lgfx::IFont& getFont() const noexcept { 
-        if (fontGetter) {
-            auto* font = fontGetter();
-            if (font != nullptr) {
-                return *font;
-            }
-        }
-        return fonts::Font2; // フォールバック
-    }
-    
-    [[nodiscard]] const lgfx::IFont* getFontPtr() const noexcept {
-        return fontGetter ? fontGetter() : &fonts::Font2;
-    }
-    
-    [[nodiscard]] bool isValid() const noexcept {
-        return static_cast<bool>(fontGetter);
-    }
-};
+// NOTE:
+// `FontInfo` はこのヘッダ内ですでに定義されています（遅延読み込み版）。
+// ここでの重複定義はコンパイルエラーになるため、レガシー互換Structは削除しました。
