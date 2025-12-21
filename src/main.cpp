@@ -66,22 +66,38 @@ void drawMotorList(int32_t centerX) {
         const auto& motor = g_motors[motorIdx];
         int32_t y = kHeaderHeight + 20 + (i * kRowHeight);
 
-        // ラベル
-        font(motor.label, Font::Pos(40, y), Palette::White);
+        // 1. ラベル (左端)
+        font(motor.label, Font::Pos(25, y), Palette::White);
 
-        // 角度表示 (度数法)
+        // 2. 角度数値 (右端)
         float degrees = motor.angleRadians * 180.0f / Math::Pi;
-        String valText = motor.updated ? String(degrees, 1) + "°" : "---";
+        String valText = motor.updated ? String(degrees, 1) + "d" : "---"; // degの代わりにd
         Color valColor = motor.updated ? Palette::Cyan : Palette::Darkgray;
         
         Font().setHorizontalAlign(Font::HorizontalAlign::Right)
               .setSize(1)
-              (valText, Font::Pos(System::Width() - 40, y), valColor);
+              (valText, Font::Pos(System::Width() - 25, y), valColor);
         
-        // 簡易インジケータ（バー）
-        Rect(140, y + 4, 40, 4).draw(Palette::Darkgray);
-        float barWidth = Math::clamp((degrees + 180.0f) / 360.0f, 0.0f, 1.0f) * 40.0f;
-        Rect(140, y + 4, (int32_t)barWidth, 4).draw(valColor);
+        // 3. 視覚的インジケータ（中央付近）
+        // 範囲を -PI/4 ~ PI/4 (-45deg ~ 45deg) に設定
+        constexpr float kRangeDeg = 45.0f;
+        int32_t barX = 110;
+        int32_t barWidth = 60;
+        int32_t barY = y + 6;
+        
+        // 背景（溝）
+        Rect(barX, barY, barWidth, 6).draw(Color(40, 40, 40));
+        
+        // 正規化 (0.0 ~ 1.0)
+        float normalized = (degrees + kRangeDeg) / (kRangeDeg * 2.0f);
+        float progress = Math::clamp(normalized, 0.0f, 1.0f);
+        
+        // アクティブなバー（更新されていれば黄色、いなければ暗い赤）
+        Color barColor = motor.updated ? Palette::Yellow : Color(100, 0, 0);
+        Rect(barX, barY, (int32_t)(progress * barWidth), 6).draw(barColor);
+        
+        // センターマーカー (0度位置)
+        Rect(barX + barWidth/2 - 1, barY - 2, 2, 10).draw(Palette::White);
     }
 
     // スクロールバーの代わり
