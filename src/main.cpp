@@ -1,247 +1,148 @@
 //
-// M5Dial Example (M5Siv3D)
-// - `examples/M5Dial_Example.cpp` をベースに、現行の M5Siv3D API（optional返り値）へ合わせた実装
+// M5Dial MsgPacketizer Telemetry Viewer (M5Siv3D)
+// - Teensy 4.1 からのモーター角度(21個)と健康状態を受信し可視化する
 //
 
 #include "M5Siv3D.h"
+#include <MsgPacketizer.h>
+#include <vector>
 
 namespace {
 
-// M5Dialは円形表示のため、四隅が欠ける。
-// そのため座標は「中心 + 円の内側マージン」基準で配置する。
-constexpr int32_t kCircleOuterMarginPixels = 6;
+// 通信設定 (Port B: Grove 黒)
+constexpr int32_t kUartBaudRate = 115200; // 安定した115200bpsを使用
+constexpr int8_t kPortBRxPin = 1; // G2
+constexpr int8_t kPortBTxPin = 2; // G1
 
-constexpr int32_t kTitleOffsetFromTopPixels = 16;
-constexpr int32_t kHelpOffsetFromBottomLine1Pixels = 22;
-constexpr int32_t kHelpOffsetFromBottomLine2Pixels = 10;
+// MsgPacketizer インデックス (Teensy側の最新定義に合わせる)
+constexpr uint8_t kIndexMotorTelemetry = 10;
+constexpr uint8_t kIndexSystemHealth = 11;
+constexpr uint8_t kIndexCommand = 0;
 
-constexpr int32_t kGaugeOffsetFromCircleEdgePixels = 42;
-constexpr int32_t kGaugeInnerRingOffsetPixels = 10;
-constexpr int32_t kNeedleOffsetPixels = 16;
-constexpr int32_t kCenterDotRadiusPixels = 5;
-
-constexpr int32_t kEncoderValueOffsetPixels = 0;
-constexpr int32_t kEncoderDeltaOffsetPixels = 34;
-constexpr int32_t kAngleLabelOffsetFromTopPixels = 34;
-constexpr int32_t kBottomValueOffsetFromBottomPixels = 40;
-
-constexpr float kDegreesPerEncoderStep = 5.0f;
-constexpr float kAngleDegreesFull = 360.0f;
-
-enum class DisplayMode : int32_t {
-    EncoderValue = 0,
-    CircularDisplay = 1,
-    RfidStatus = 2,
-    Count,
+// モーター構成
+struct MotorInfo {
+    String label;
+    float angleRadians = 0.0f;
+    bool updated = false;
 };
 
-struct AppState {
-    long lastEncoderValue = 0;
-    DisplayMode displayMode = DisplayMode::EncoderValue;
-    Color currentColor = Palette::White;
-    float hueDegrees = 0.0f;
+// TeensyのProjectConfigに基づいたモーターリスト
+std::vector<MotorInfo> g_motors = {
+    {"HipL"}, {"HipR"}, {"HipTwist"},
+    {"NeckL"}, {"NeckR"}, {"NeckTwist"}, {"Eyelid"},
+    {"LeftArm01"}, {"LeftArm02"}, {"LeftArm03"}, {"LeftArm04"}, {"LeftArm05"}, {"LeftArm06"}, {"LeftArm07"},
+    {"RightArm01"}, {"RightArm02"}, {"RightArm03"}, {"RightArm04"}, {"RightArm05"}, {"RightArm06"}, {"RightArm07"}
 };
 
-struct CircleLayout {
-    int32_t centerX = 0;
-    int32_t centerY = 0;
-    int32_t radius = 0;
-    int32_t titleY = 0;
-    int32_t helpLine1Y = 0;
-    int32_t helpLine2Y = 0;
-};
+// システム状態
+int32_t g_systemHealth = 0; // 0: OK, 1: FAULT
+int32_t g_scrollIndex = 0;   // エンコーダーで操作するスクロール位置
+constexpr int32_t kMaxVisibleMotors = 5;
 
-CircleLayout getCircleLayout() {
-    const int32_t width = System::Width();
-    const int32_t height = System::Height();
-    const int32_t centerX = width / 2;
-    const int32_t centerY = height / 2;
-    const int32_t minSide = (width < height) ? width : height;
-    const int32_t radius = (minSide / 2) - kCircleOuterMarginPixels;
+// レイアウト定数
+constexpr int32_t kHeaderHeight = 45;
+constexpr int32_t kRowHeight = 30;
 
-    CircleLayout layout{};
-    layout.centerX = centerX;
-    layout.centerY = centerY;
-    layout.radius = radius;
-    layout.titleY = (centerY - radius) + kTitleOffsetFromTopPixels;
-    layout.helpLine1Y = (centerY + radius) - kHelpOffsetFromBottomLine1Pixels;
-    layout.helpLine2Y = (centerY + radius) - kHelpOffsetFromBottomLine2Pixels;
-    return layout;
+void drawHeader(int32_t centerX) {
+    const Color healthColor = (g_systemHealth == 0) ? Palette::Green : Palette::Red;
+    const String healthText = (g_systemHealth == 0) ? "SYSTEM: OK" : "SYSTEM: FAULT";
+
+    Font().setHorizontalAlign(Font::HorizontalAlign::Center)
+          .setSize(2)
+          (healthText, Font::Pos(centerX, 30), healthColor);
+    
+    Line(0, kHeaderHeight, System::Width(), kHeaderHeight).draw(Palette::Gray);
 }
 
-String getModeText(DisplayMode mode) {
-    switch (mode) {
-    case DisplayMode::EncoderValue:
-        return "Encoder Value";
-    case DisplayMode::CircularDisplay:
-        return "Circular Display";
-    case DisplayMode::RfidStatus:
-        return "RFID Status";
-    default:
-        return "Unknown";
-    }
-}
+void drawMotorList(int32_t centerX) {
+    Font font;
+    font.setHorizontalAlign(Font::HorizontalAlign::Left)
+        .setSize(1);
 
-void drawTitle(const CircleLayout& layout, const DisplayMode mode) {
-    Font titleFont;
-    titleFont.setSize(1)
-        .setHorizontalAlign(Font::HorizontalAlign::Center)
-        .setVerticalAlign(Font::VerticalAlign::Center);
+    for (int32_t i = 0; i < kMaxVisibleMotors; ++i) {
+        int32_t motorIdx = g_scrollIndex + i;
+        if (motorIdx >= (int32_t)g_motors.size()) break;
 
-    titleFont("M5Dial: " + getModeText(mode), Font::Pos(layout.centerX, layout.titleY), Palette::White);
-}
+        const auto& motor = g_motors[motorIdx];
+        int32_t y = kHeaderHeight + 20 + (i * kRowHeight);
 
-void drawFooterHelp(const CircleLayout& layout) {
-    Font helpFont;
-    helpFont.setSize(1)
-        .setHorizontalAlign(Font::HorizontalAlign::Center);
+        // ラベル
+        font(motor.label, Font::Pos(40, y), Palette::White);
 
-    helpFont("Rotate: Change value", Font::Pos(layout.centerX, layout.helpLine1Y), Palette::Gray);
-    helpFont("Button A: Reset / Change mode", Font::Pos(layout.centerX, layout.helpLine2Y), Palette::Gray);
-}
-
-void drawEncoderValuePanel(const CircleLayout& layout, const long encoderValue, const Color& currentColor) {
-    Font largeFont;
-    largeFont.setSize(3)
-        .setHorizontalAlign(Font::HorizontalAlign::Center)
-        .setVerticalAlign(Font::VerticalAlign::Center);
-
-    largeFont(String(encoderValue), Font::Pos(layout.centerX, layout.centerY + kEncoderValueOffsetPixels), currentColor);
-
-    const auto encoderDelta = Input::Encoder.getDelta();
-    if (!encoderDelta.has_value() || encoderDelta.value() == 0) {
-        return;
+        // 角度表示 (度数法)
+        float degrees = motor.angleRadians * 180.0f / Math::Pi;
+        String valText = motor.updated ? String(degrees, 1) + "°" : "---";
+        Color valColor = motor.updated ? Palette::Cyan : Palette::Darkgray;
+        
+        Font().setHorizontalAlign(Font::HorizontalAlign::Right)
+              .setSize(1)
+              (valText, Font::Pos(System::Width() - 40, y), valColor);
+        
+        // 簡易インジケータ（バー）
+        Rect(140, y + 4, 40, 4).draw(Palette::Darkgray);
+        float barWidth = Math::clamp((degrees + 180.0f) / 360.0f, 0.0f, 1.0f) * 40.0f;
+        Rect(140, y + 4, (int32_t)barWidth, 4).draw(valColor);
     }
 
-    Font smallFont;
-    smallFont.setSize(1)
-        .setHorizontalAlign(Font::HorizontalAlign::Center);
-
-    const String deltaText = "Δ" + String(encoderDelta.value());
-    const auto deltaColor = (encoderDelta.value() > 0) ? Palette::Green : Palette::Red;
-    smallFont(deltaText, Font::Pos(layout.centerX, layout.centerY + kEncoderDeltaOffsetPixels), deltaColor);
+    // スクロールバーの代わり
+    int32_t barY = kHeaderHeight + 10;
+    int32_t barH = (System::Height() - kHeaderHeight - 20);
+    float progress = (float)g_scrollIndex / (g_motors.size() - kMaxVisibleMotors);
+    Circle(System::Width() - 10, barY + (progress * barH), 3).draw(Palette::Gray);
 }
 
-void drawCircularDisplayPanel(const CircleLayout& layout, const long encoderValue, const Color& currentColor) {
-    const int32_t requestedGaugeRadius = layout.radius - kGaugeOffsetFromCircleEdgePixels;
-    const int32_t gaugeRadius = (requestedGaugeRadius < 10) ? 10 : requestedGaugeRadius;
-    const int32_t centerX = layout.centerX;
-    const int32_t centerY = layout.centerY;
-
-    Circle(centerX, centerY, gaugeRadius).drawFrame(Palette::White);
-    Circle(centerX, centerY, gaugeRadius - kGaugeInnerRingOffsetPixels).drawFrame(Palette::Darkgray);
-
-    const float angleDegrees = Math::fmod(static_cast<float>(encoderValue), kAngleDegreesFull);
-    const float angleRadians = angleDegrees * Math::Pi / 180.0f;
-
-    const int needleX = centerX + (gaugeRadius - kNeedleOffsetPixels) * cos(angleRadians - Math::HalfPi);
-    const int needleY = centerY + (gaugeRadius - kNeedleOffsetPixels) * sin(angleRadians - Math::HalfPi);
-
-    Line(centerX, centerY, needleX, needleY).draw(currentColor);
-    Circle(centerX, centerY, kCenterDotRadiusPixels).draw(currentColor);
-
-    for (int tickIndex = 0; tickIndex < 12; ++tickIndex) {
-        const float tickAngle = tickIndex * Math::Pi / 6;
-        const int tick1X = centerX + (gaugeRadius - 5) * cos(tickAngle - Math::HalfPi);
-        const int tick1Y = centerY + (gaugeRadius - 5) * sin(tickAngle - Math::HalfPi);
-        const int tick2X = centerX + gaugeRadius * cos(tickAngle - Math::HalfPi);
-        const int tick2Y = centerY + gaugeRadius * sin(tickAngle - Math::HalfPi);
-        Line(tick1X, tick1Y, tick2X, tick2Y).draw(Palette::White);
-    }
-
-    Font valueFont;
-    valueFont.setSize(2)
-        .setHorizontalAlign(Font::HorizontalAlign::Center);
-    valueFont(String(encoderValue), Font::Pos(centerX, layout.helpLine1Y - kBottomValueOffsetFromBottomPixels), Palette::Green);
-
-    Font angleFont;
-    angleFont.setSize(1)
-        .setHorizontalAlign(Font::HorizontalAlign::Center);
-    angleFont("Angle: " + String(static_cast<int>(angleDegrees)) + "°", Font::Pos(centerX, layout.titleY + kAngleLabelOffsetFromTopPixels), Palette::White);
-}
-
-void drawRfidStatusPanel(const CircleLayout& layout) {
-    Font titleFont;
-    titleFont.setSize(2)
-        .setHorizontalAlign(Font::HorizontalAlign::Center);
-    titleFont("RFID Reader", Font::Pos(layout.centerX, layout.titleY + kAngleLabelOffsetFromTopPixels), Palette::Cyan);
-
-    Font statusFont;
-    statusFont.setSize(1)
-        .setHorizontalAlign(Font::HorizontalAlign::Center);
-
-    // NOTE: 現状 `SafeDialRFID` は未実装箇所があり、カード検出は常に false になり得ます。
-    // 将来的に M5Dial の MFRC522 API をここへ接続します。
-    if (!Input::RFID.isCardPresent()) {
-        statusFont("No Card", Font::Pos(layout.centerX, layout.centerY - 10), Palette::Red);
-        statusFont("Place card near device", Font::Pos(layout.centerX, layout.centerY + 10), Palette::Gray);
-        Circle(layout.centerX, layout.centerY + 40, 20).drawFrame(Palette::Red);
-        return;
-    }
-
-    statusFont("Card Detected!", Font::Pos(layout.centerX, layout.centerY - 10), Palette::Green);
-
-    const auto uid = Input::RFID.readCardUID();
-    if (uid.has_value()) {
-        statusFont("UID: " + uid.value(), Font::Pos(layout.centerX, layout.centerY + 10), Palette::Yellow);
-    }
-    Circle(layout.centerX, layout.centerY + 40, 20).draw(Palette::Green);
-}
-
-DisplayMode nextMode(DisplayMode mode) {
-    const auto next = (static_cast<int32_t>(mode) + 1) % static_cast<int32_t>(DisplayMode::Count);
-    return static_cast<DisplayMode>(next);
-}
-
-}  // namespace
+} // namespace
 
 void Main() {
     System::SetBackgroundColor(Palette::Black);
 
-    AppState appState{};
-    const auto layout = getCircleLayout();
+    // Serial2 (Port B) 初期化
+    Serial2.begin(kUartBaudRate, SERIAL_8N1, kPortBRxPin, kPortBTxPin);
 
-    Print << "M5Siv3D with M5Dial Example";
-    Print << "Rotate encoder to change values";
-    Print << "Press Button A to change modes";
-
-    while (System::Update()) {
-        const long encoderValue = Input::Encoder.getValueOr(appState.lastEncoderValue);
-
-        if (encoderValue != appState.lastEncoderValue) {
-            appState.lastEncoderValue = encoderValue;
-            appState.hueDegrees = Math::fmod(encoderValue * kDegreesPerEncoderStep, kAngleDegreesFull);
-            appState.currentColor = Color::FromHSV(appState.hueDegrees, 1.0f, 1.0f);
-        }
-
-        if (Input::ButtonA.pressed()) {
-            if (appState.displayMode == DisplayMode::RfidStatus) {
-                appState.displayMode = DisplayMode::EncoderValue;
+    // MsgPacketizer 購読設定
+    // 1. モーター角度配列 (Index 10)
+    MsgPacketizer::subscribe(Serial2, kIndexMotorTelemetry, [](const std::vector<float>& angles) {
+        for (size_t i = 0; i < angles.size() && i < g_motors.size(); ++i) {
+            if (angles[i] > -900.0f) {
+                g_motors[i].angleRadians = angles[i];
+                g_motors[i].updated = true;
             } else {
-                Input::Encoder.reset();
-                appState.lastEncoderValue = 0;
-                appState.displayMode = nextMode(appState.displayMode);
+                g_motors[i].updated = false;
             }
         }
+    });
 
-        // 円形表示に合わせ、UIは全て中心基準で配置する
-        drawTitle(layout, appState.displayMode);
+    // 2. システム健康状態 (Index 11)
+    MsgPacketizer::subscribe(Serial2, kIndexSystemHealth, [](int32_t health) {
+        g_systemHealth = health;
+    });
 
-        switch (appState.displayMode) {
-        case DisplayMode::EncoderValue:
-            drawEncoderValuePanel(layout, encoderValue, appState.currentColor);
-            break;
-        case DisplayMode::CircularDisplay:
-            drawCircularDisplayPanel(layout, encoderValue, appState.currentColor);
-            break;
-        case DisplayMode::RfidStatus:
-            drawRfidStatusPanel(layout);
-            break;
-        default:
-            break;
+    while (System::Update()) {
+        // MsgPacketizer の更新
+        MsgPacketizer::update();
+
+        // エンコーダーでスクロール
+        const long encoderDelta = Input::getDialEncoder().getDelta().value_or(0);
+        if (encoderDelta != 0) {
+            g_scrollIndex = Math::clamp((int32_t)(g_scrollIndex + encoderDelta), 0, (int32_t)g_motors.size() - kMaxVisibleMotors);
         }
 
-        drawFooterHelp(layout);
+        // ボタンAでリセットコマンド送信
+        if (Input::getButtonA().pressed()) {
+            MsgPacketizer::send(Serial2, kIndexCommand, String("CLEAR_FAULTS"));
+            // 視覚的フィードバック（中心に円を描画）
+            Circle(System::Width()/2, System::Height()/2, 20).draw(Palette::Orange);
+        }
+
+        // 描画
+        const int32_t centerX = System::Width() / 2;
+        drawHeader(centerX);
+        drawMotorList(centerX);
+
+        // デバッグ情報（受信バイト数表示を削除し、本来のヘルプを表示）
+        Font().setHorizontalAlign(Font::HorizontalAlign::Center)
+              .setSize(1)
+              ("BtnA: Clear Faults", Font::Pos(centerX, System::Height() - 15), Palette::Gray);
 
         ClearPrint();
         drawPrint();
