@@ -65,7 +65,7 @@ public:
     }
     
     void sendCommand(const kstd::string& command) {
-        MsgPacketizer::send(Serial2, kIndexCommand, static_cast<const std::string&>(command));
+        MsgPacketizer::send(Serial2, kIndexCommand, String(command.c_str()));
     }
     
     const RobotState& getState() const { return m_state; }
