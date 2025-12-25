@@ -43,6 +43,8 @@ struct RobotState {
     int32_t crashLatch = 0;
     int32_t persistentArmState = 0;
     kstd::vector<int32_t> portFaults;
+    int32_t engineRunning = 0;   // 1: 録画エンジン動作中
+    int32_t groupModes[5] = {0}; // 0:OFF, 1:PLAY, 2:REC (Hip, Head, Eyelid, ArmL, ArmR)
     DiagnosticData diagnostics;
 
     RobotState() {
@@ -67,7 +69,14 @@ public:
     }
     
     void sendCommand(const kstd::string& command) {
-        MsgPacketizer::send(Serial2, kIndexCommand, String(command.c_str()));
+        // デバッグログ
+        Serial.printf("[COMMS] Sending: %s\n", command.c_str());
+        // char* として渡す (MsgPackのString型として適切に変換される)
+        MsgPacketizer::send(Serial2, kIndexCommand, command.c_str());
+        // 物理的にシリアルバッファを空にする
+        Serial2.flush();
+        // 送信処理を完了させる
+        MsgPacketizer::update();
     }
     
     const RobotState& getState() const { return m_state; }
@@ -87,8 +96,17 @@ private:
         m_actions = {
             {"TORQUE ON", "TORQUE_ON", Palette::Cyan},
             {"TORQUE OFF", "TORQUE_OFF", Palette::Yellow},
+            {"HIP ON", "TORQUE_ON:HIP", Palette::Deepskyblue},
+            {"HEAD ON", "TORQUE_ON:HEAD", Palette::Deepskyblue},
+            {"L-ARM ON", "TORQUE_ON:ARM_L", Palette::Deepskyblue},
+            {"R-ARM ON", "TORQUE_ON:ARM_R", Palette::Deepskyblue},
+            {"ARMS ON", "TORQUE_ON:ARMS", Palette::Deepskyblue},
             {"CLEAR FAULTS", "CLEAR_FAULTS", Palette::Orange},
-            {"REBOOT SYSTEM", "REBOOT", Palette::Red}
+            {"RESET CRASH", "CLEAR_CRASH_LATCH", Palette::Orangered},
+            {"REBOOT SYSTEM", "REBOOT", Palette::Red},
+            {"ARMS REC", "REC_PRESET:ARMS_REC", Palette::Magenta},
+            {"EYELID REC", "REC_PRESET:EYELID_REC", Palette::Purple},
+            {"ALL PLAY", "REC_PRESET:ALL_PLAY", Palette::Green}
         };
     }
     
@@ -137,7 +155,7 @@ private:
             m_state.diagnostics.lastHealthMs = millis();
             m_state.diagnostics.msgCount++;
 
-            if (healthData.size() < 2) {
+            if (healthData.size() < 7) {
                 m_state.diagnostics.errorCount++;
                 m_state.diagnostics.lastError = "Health data too short";
                 return;
@@ -146,9 +164,17 @@ private:
             m_state.crashLatch = healthData[0];
             m_state.persistentArmState = healthData[1];
 
-            // ポート障害フラグの更新
-            for (size_t i = 2; i < healthData.size() && (i - 2) < m_state.portFaults.size(); ++i) {
+            // ポート障害フラグの更新 (2..5)
+            for (size_t i = 2; i < 6 && (i - 2) < m_state.portFaults.size(); ++i) {
                 m_state.portFaults[i - 2] = healthData[i];
+            }
+
+            // 録画エンジンとグループモードのパース (7..12)
+            if (healthData.size() >= 13) {
+                m_state.engineRunning = healthData[7];
+                for (int i = 0; i < 5; ++i) {
+                    m_state.groupModes[i] = healthData[8 + i];
+                }
             }
         });
     }

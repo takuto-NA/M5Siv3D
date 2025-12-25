@@ -48,6 +48,22 @@ const std::array<BodyPos, 21> g_bodyCoords = {{
     {150, 110}, {160, 120}, {170, 130}, {180, 140}, {190, 150}, {200, 160}, {210, 170} // RightArm 01-07 (右)
 }};
 
+// モーターインデックスからグループインデックスへのマッピング
+int32_t getGroupIndex(int32_t motorIdx) {
+    if (motorIdx >= 0 && motorIdx <= 2) return 0;  // HIP
+    if (motorIdx >= 3 && motorIdx <= 5) return 1;  // HEAD
+    if (motorIdx == 6) return 2;                   // EYELID
+    if (motorIdx >= 7 && motorIdx <= 13) return 3; // ARM_L
+    if (motorIdx >= 14 && motorIdx <= 20) return 4;// ARM_R
+    return -1;
+}
+
+const char* getGroupName(int32_t groupIdx) {
+    static const char* names[] = {"HIP", "HEAD", "EYE", "ARM_L", "ARM_R"};
+    if (groupIdx >= 0 && groupIdx < 5) return names[groupIdx];
+    return "";
+}
+
 void drawHeader(int32_t centerX) {
     const Color pipGreen = Color(30, 255, 30);
     const auto& state = robot::CommsManager::getInstance().getState();
@@ -62,9 +78,32 @@ void drawHeader(int32_t centerX) {
     if (!state.diagnostics.isConnected()) {
         Font().setHorizontalAlign(Font::HorizontalAlign::Center).setSize(1)
               ("!! DISCONNECTED !!", Font::Pos(centerX, 15), Palette::Red);
-    } else if (state.diagnostics.errorCount > 0) {
+    } else {
+        // グローバル録画ステータスの表示
+        bool anyRec = false;
+        bool anyPlay = false;
+        for (int i = 0; i < 5; ++i) {
+            if (state.groupModes[i] == 2) anyRec = true;
+            if (state.groupModes[i] == 1) anyPlay = true;
+        }
+
+        String recText = "■ STOP";
+        Color recColor = Palette::Gray;
+        if (anyRec) {
+            recText = "● REC";
+            recColor = Palette::Red;
+        } else if (anyPlay || state.engineRunning) {
+            recText = "▶ PLAY";
+            recColor = Palette::Deepskyblue;
+        }
+
         Font().setHorizontalAlign(Font::HorizontalAlign::Center).setSize(1)
-              ("COMM ERROR", Font::Pos(centerX, 15), Palette::Orange);
+              (recText, Font::Pos(centerX, 15), recColor);
+
+        if (state.diagnostics.errorCount > 0) {
+            Font().setHorizontalAlign(Font::HorizontalAlign::Left).setSize(1)
+                  ("ERR", Font::Pos(30, 15), Palette::Orange);
+        }
     }
 
     // システムクラッシュ状態 (上部左寄り)
@@ -98,20 +137,35 @@ void drawHeader(int32_t centerX) {
 void drawActionMenu(int32_t centerX) {
     const int32_t startY = 75;
     const int32_t itemHeight = 35;
+    const int32_t maxVisible = 4;
     const auto& actions = robot::CommsManager::getInstance().getActions();
 
-    for (int32_t i = 0; i < (int32_t)actions.size(); ++i) {
-        const auto& action = actions[i];
-        int32_t y = startY + (i * itemHeight);
-        bool isSelected = (i == g_menuIndex);
+    // スクロール位置の計算 (選択中のアイテムが中央付近に来るように)
+    int32_t scrollOffset = 0;
+    if ((int32_t)actions.size() > maxVisible) {
+        scrollOffset = g_menuIndex - (maxVisible / 2);
+        scrollOffset = Math::clamp(scrollOffset, 0, (int32_t)actions.size() - maxVisible);
+    }
 
-        // 背景ハイライト (円形に合わせて幅を狭める)
+    for (int32_t i = 0; i < maxVisible && (i + scrollOffset) < (int32_t)actions.size(); ++i) {
+        int32_t idx = i + scrollOffset;
+        const auto& action = actions[idx];
+        int32_t y = startY + (i * itemHeight);
+        bool isSelected = (idx == g_menuIndex);
+
+        // 背景ハイライト
         if (isSelected) {
             Rect(45, y - 5, 150, 30).drawFrame(action.color); 
-            Rect(45, y - 5, 4, 30).draw(action.color);      
+            Rect(45, y - 5, 4, 30).draw(action.color);
         }
 
         Color textColor = isSelected ? Palette::White : Palette::Gray;
+        
+        // 録画プリセットにはアイコン代わりの印を付ける
+        if (action.command.find("REC_PRESET") == 0) {
+            Circle(52, y + 10, 3).draw(isSelected ? Palette::Red : Palette::Darkred);
+        }
+
         Font().setHorizontalAlign(Font::HorizontalAlign::Left)
               .setSize(1)
               (action.label.c_str(), Font::Pos(60, y), textColor);
@@ -124,10 +178,17 @@ void drawActionMenu(int32_t centerX) {
         }
     }
 
-    // 操作ガイド (少し上にずらす)
+    // スクロールインジケータ (右側)
+    if ((int32_t)actions.size() > maxVisible) {
+        float barH = (maxVisible * itemHeight);
+        float progress = (float)scrollOffset / (actions.size() - maxVisible);
+        Circle(System::Width() - 25, startY + (progress * (barH - 10)), 2).draw(Palette::Gray);
+    }
+
+    // 操作ガイド
     Font().setHorizontalAlign(Font::HorizontalAlign::Center)
           .setSize(1)
-          ("Dial: Select / Hold: Run", Font::Pos(centerX, 215), Palette::Darkgray);
+          ("Dial: Select / Hold: Execute", Font::Pos(centerX, 215), Palette::Darkgray);
 }
 
 void drawBodyDashboard() {
@@ -152,6 +213,8 @@ void drawBodyDashboard() {
     for (size_t i = 0; i < state.motors.size(); ++i) {
         const auto& motor = state.motors[i];
         const auto& pos = g_bodyCoords[i];
+        int32_t groupIdx = getGroupIndex((int32_t)i);
+        int32_t mode = (groupIdx != -1) ? state.groupModes[groupIdx] : 0;
         
         Color dotColor;
         bool hasError = (motor.errorStatus != 0);
@@ -160,16 +223,26 @@ void drawBodyDashboard() {
         else if (state.crashLatch != 0 || hasError) dotColor = Palette::Red;
         else dotColor = pipBrightGreen;
         
-        // ジョイントの描画
+        // モードに応じた「オーラ」の描画
         if (motor.updated) {
-            float pulseScale = hasError ? 3.0f : 1.5f; // エラー時はより激しくパルス
+            // REC: 赤い太いパルス, PLAY: 水色の細い光, OFF: なし
+            if (mode == 2) { // REC
+                float pulse = (float)sin(millis() * 0.015f) * 4.0f;
+                Circle(pos.x, pos.y, 6 + (int32_t)abs(pulse)).drawFrame(Palette::Red);
+            } else if (mode == 1) { // PLAY
+                float pulse = (float)sin(millis() * 0.005f) * 2.0f;
+                Circle(pos.x, pos.y, 5 + (int32_t)abs(pulse)).drawFrame(Palette::Deepskyblue);
+            }
+
+            // 標準のジョイントパルス（エラー時は赤）
+            float pulseScale = hasError ? 3.0f : 1.5f;
             float pulseSpeed = hasError ? 0.015f : 0.005f;
             float pulse = (float)sin(millis() * pulseSpeed) * pulseScale;
             
             Color ringColor = hasError ? Palette::Red : pipBrightGreen;
             Circle(pos.x, pos.y, 4 + (int32_t)abs(pulse)).drawFrame(ringColor);
 
-            // トルクOFF時は中抜きにする
+            // トルク状態
             if (motor.isTorqueEnabled) {
                 Rect(pos.x - 2, pos.y - 2, 4, 4).draw(dotColor);
             } else {
@@ -187,13 +260,28 @@ void drawMotorList(int32_t centerX) {
         .setSize(1);
     const auto& state = robot::CommsManager::getInstance().getState();
 
+    int32_t lastGroupIdx = -1;
+
     for (int32_t i = 0; i < kMaxVisibleMotors; ++i) {
         int32_t motorIdx = g_scrollIndex + i;
         if (motorIdx >= (int32_t)state.motors.size()) break;
 
         const auto& motor = state.motors[motorIdx];
+        int32_t groupIdx = getGroupIndex(motorIdx);
         int32_t y = kHeaderHeight + 25 + (i * kRowHeight);
         bool hasError = (motor.errorStatus != 0);
+
+        // 部位の変わり目にインジケータ（グループ名の略称を表示）
+        if (groupIdx != lastGroupIdx) {
+            Color grpColor = Palette::Gray;
+            String modeStr = "";
+            if (state.groupModes[groupIdx] == 2) { grpColor = Palette::Red; modeStr = " (REC)"; }
+            else if (state.groupModes[groupIdx] == 1) { grpColor = Palette::Deepskyblue; modeStr = " (PLY)"; }
+            
+            Font().setHorizontalAlign(Font::HorizontalAlign::Left).setSize(1)
+                  (String(getGroupName(groupIdx)) + modeStr, Font::Pos(25, y - 12), grpColor);
+            lastGroupIdx = groupIdx;
+        }
 
         // 1. ラベル (エラー時は赤色)
         Color labelColor = hasError ? Palette::Red : Palette::White;
@@ -210,9 +298,14 @@ void drawMotorList(int32_t centerX) {
         String valText;
         if (!motor.updated) valText = "---";
         else {
-            valText = String(degrees, 0); // 整数表示でスペース節約
+            valText = String(degrees, 0); 
             if (hasError) valText += "!";
-            else valText += (motor.isTorqueEnabled ? "T" : "f");
+            else {
+                // グループモードの略称を付与
+                if (state.groupModes[groupIdx] == 2) valText += "R";
+                else if (state.groupModes[groupIdx] == 1) valText += "P";
+                else valText += (motor.isTorqueEnabled ? "T" : "f");
+            }
         }
         
         Font().setHorizontalAlign(Font::HorizontalAlign::Right)
@@ -294,9 +387,12 @@ void Main() {
                     robot::CommsManager::getInstance().sendCommand(actions[g_menuIndex].command);
                     g_flashTimer = 15;
                 } else {
-                    // ActionMenu以外でも長押しでCLEAR_FAULTSを実行
+                    // ActionMenu以外での長押しは「一括復旧」とする
+                    // FAULTクリアとCRASHラッチクリアを同時に送信
                     robot::CommsManager::getInstance().sendCommand("CLEAR_FAULTS");
-                    g_flashTimer = 10;
+                    delay(50); // 送信間隔を空けて確実性を高める
+                    robot::CommsManager::getInstance().sendCommand("CLEAR_CRASH_LATCH");
+                    g_flashTimer = 20; 
                 }
                 g_commandExecuted = true;
             }
