@@ -4,8 +4,8 @@
 //
 
 #include "M5Siv3D.h"
-#include <MsgPacketizer.h>
-#include <vector>
+#include "SafeKiboSTL.hpp"
+#include "CommsManager.hpp"
 
 namespace {
 
@@ -14,36 +14,24 @@ constexpr int32_t kUartBaudRate = 115200; // 安定した115200bpsを使用
 constexpr int8_t kPortBRxPin = 1; // G2
 constexpr int8_t kPortBTxPin = 2; // G1
 
-// MsgPacketizer インデックス (Teensy側の最新定義に合わせる)
-constexpr uint8_t kIndexMotorTelemetry = 10;
-constexpr uint8_t kIndexSystemHealth = 11;
-constexpr uint8_t kIndexCommand = 0;
-
-// モーター構成
-struct MotorInfo {
-    String label;
-    float angleRadians = 0.0f;
-    bool updated = false;
-};
-
-// TeensyのProjectConfigに基づいたモーターリスト
-std::vector<MotorInfo> g_motors = {
-    {"HipL"}, {"HipR"}, {"HipTwist"},
-    {"NeckL"}, {"NeckR"}, {"NeckTwist"}, {"Eyelid"},
-    {"LeftArm01"}, {"LeftArm02"}, {"LeftArm03"}, {"LeftArm04"}, {"LeftArm05"}, {"LeftArm06"}, {"LeftArm07"},
-    {"RightArm01"}, {"RightArm02"}, {"RightArm03"}, {"RightArm04"}, {"RightArm05"}, {"RightArm06"}, {"RightArm07"}
-};
-
 // システム状態
-int32_t g_systemHealth = 0; // 0: OK, 1: FAULT
 int32_t g_scrollIndex = 0;   // エンコーダーで操作するスクロール位置
 constexpr int32_t kMaxVisibleMotors = 5;
 
 enum class DisplayMode {
     BodyDashboard, // 概要（Pip-boy風）
-    MotorList      // 詳細リスト
+    MotorList,      // 詳細リスト
+    ActionMenu     // コマンドメニュー
 };
 DisplayMode g_displayMode = DisplayMode::BodyDashboard;
+
+int32_t g_menuIndex = 0;
+uint32_t g_flashTimer = 0; // 送信時のフィードバック用
+
+// ボタン操作管理 (UIUX: 誤操作防止とホールドメーター用)
+uint32_t g_pressStartTime = 0;
+bool g_commandExecuted = false;
+constexpr uint32_t kHoldThresholdMs = 800;
 
 // レイアウト定数
 constexpr int32_t kHeaderHeight = 45;
@@ -53,38 +41,100 @@ constexpr int32_t kRowHeight = 30;
 struct BodyPos {
     int16_t x, y;
 };
-const BodyPos g_bodyCoords[] = {
+const std::array<BodyPos, 21> g_bodyCoords = {{
     {135, 180}, {105, 180}, {120, 160}, // 0:HipL(右), 1:HipR(左), 2:HipTwist(上)
     {130, 85},  {110, 85},  {120, 70}, {120, 55}, // 3:NeckL, 4:NeckR, 5:NeckTwist, 6:Eyelid(最上部)
     {90, 110}, {80, 120}, {70, 130}, {60, 140}, {50, 150}, {40, 160}, {30, 170}, // LeftArm 01-07 (左)
     {150, 110}, {160, 120}, {170, 130}, {180, 140}, {190, 150}, {200, 160}, {210, 170} // RightArm 01-07 (右)
-};
+}};
 
 void drawHeader(int32_t centerX) {
     const Color pipGreen = Color(30, 255, 30);
-    const Color healthColor = (g_systemHealth == 0) ? pipGreen : Palette::Red;
-    const String healthText = (g_systemHealth == 0) ? "SYSTEM: OK" : "SYSTEM: FAULT";
-
+    const auto& state = robot::CommsManager::getInstance().getState();
+    
     // 背景の薄いグリッド (透過の代わりに暗い色で)
     for (int i = 0; i < 240; i += 40) {
         Line(i, 0, i, 240).draw(Color(0, 30, 0));
         Line(0, i, 240, i).draw(Color(0, 30, 0));
     }
 
-    Font().setHorizontalAlign(Font::HorizontalAlign::Center)
-          .setSize(2)
-          (healthText, Font::Pos(centerX, 25), healthColor);
+    // 接続状態インジケータ (左端)
+    if (!state.diagnostics.isConnected()) {
+        Font().setHorizontalAlign(Font::HorizontalAlign::Left).setSize(1)
+              ("DISCONNECTED", Font::Pos(10, 5), Palette::Red);
+    } else if (state.diagnostics.errorCount > 0) {
+        Font().setHorizontalAlign(Font::HorizontalAlign::Left).setSize(1)
+              ("COMM ERR", Font::Pos(10, 5), Palette::Orange);
+    }
+
+    // システムクラッシュ状態 (左上)
+    const Color crashColor = (state.crashLatch == 0) ? pipGreen : Palette::Red;
+    Font().setHorizontalAlign(Font::HorizontalAlign::Left).setSize(1)
+          ((state.crashLatch == 0 ? "SYS:OK" : "SYS:CRASH"), Font::Pos(20, 20), crashColor);
+
+    // ポート障害インジケータ (中央)
+    const char* portLabels[] = {"S", "H", "L", "R"};
+    for (size_t i = 0; i < state.portFaults.size(); ++i) {
+        Color c = (state.portFaults[i] == 0) ? pipGreen : Palette::Red;
+        Font().setHorizontalAlign(Font::HorizontalAlign::Center).setSize(1)
+              (portLabels[i], Font::Pos(95 + i * 15, 20), c);
+    }
+
+    // システム全体のトルク設定 (右上)
+    const Color armColor = (state.persistentArmState == 1) ? Palette::Yellow : Palette::Gray;
+    Font().setHorizontalAlign(Font::HorizontalAlign::Right).setSize(1)
+          ((state.persistentArmState == 1 ? "ARM" : "DISARM"), Font::Pos(220, 20), armColor);
     
-    String modeName = (g_displayMode == DisplayMode::BodyDashboard) ? "-- STATUS OVERVIEW --" : "-- SENSOR DETAIL --";
+    String modeName;
+    if (g_displayMode == DisplayMode::BodyDashboard) modeName = "-- STATUS OVERVIEW --";
+    else if (g_displayMode == DisplayMode::MotorList) modeName = "-- SENSOR DETAIL --";
+    else modeName = "-- COMMAND MENU --";
+
     Font().setHorizontalAlign(Font::HorizontalAlign::Center)
           .setSize(1)
           (modeName, Font::Pos(centerX, 45), pipGreen);
+}
+
+void drawActionMenu(int32_t centerX) {
+    const int32_t startY = 70;
+    const int32_t itemHeight = 35;
+    const auto& actions = robot::CommsManager::getInstance().getActions();
+
+    for (int32_t i = 0; i < (int32_t)actions.size(); ++i) {
+        const auto& action = actions[i];
+        int32_t y = startY + (i * itemHeight);
+        bool isSelected = (i == g_menuIndex);
+
+        // 背景ハイライト (UIUX: 選択状態を明確に)
+        if (isSelected) {
+            Rect(20, y - 5, 200, 30).drawFrame(action.color); // 枠線でハイライト
+            Rect(20, y - 5, 4, 30).draw(action.color);      // 左側にアクセントバー
+        }
+
+        Color textColor = isSelected ? Palette::White : Palette::Gray;
+        Font().setHorizontalAlign(Font::HorizontalAlign::Left)
+              .setSize(1)
+              (action.label.c_str(), Font::Pos(35, y), textColor);
+
+        if (isSelected) {
+            // 決定ガイド
+            Font().setHorizontalAlign(Font::HorizontalAlign::Right)
+                  .setSize(1)
+                  ("HOLD >", Font::Pos(210, y), action.color);
+        }
+    }
+
+    // 操作ガイド
+    Font().setHorizontalAlign(Font::HorizontalAlign::Center)
+          .setSize(1)
+          ("Dial: Select / Btn Hold: Execute", Font::Pos(centerX, 200), Palette::Darkgray);
 }
 
 void drawBodyDashboard() {
     const int32_t cx = 120;
     const Color pipDarkGreen = Color(0, 100, 0);
     const Color pipBrightGreen = Color(30, 255, 30);
+    const auto& state = robot::CommsManager::getInstance().getState();
 
     // 骨格ライン（Pip-boy風）
     Line(cx, 70, cx, 160).draw(pipDarkGreen); 
@@ -99,13 +149,13 @@ void drawBodyDashboard() {
     Line(220, 220, 220-d, 220).draw(pipBrightGreen);
     Line(220, 220, 220, 220-d).draw(pipBrightGreen);
 
-    for (size_t i = 0; i < g_motors.size(); ++i) {
-        const auto& motor = g_motors[i];
+    for (size_t i = 0; i < state.motors.size(); ++i) {
+        const auto& motor = state.motors[i];
         const auto& pos = g_bodyCoords[i];
         
         Color dotColor;
         if (!motor.updated) dotColor = Color(80, 20, 20); 
-        else if (g_systemHealth != 0) dotColor = Palette::Red;
+        else if (state.crashLatch != 0) dotColor = Palette::Red;
         else dotColor = pipBrightGreen;
         
         // ジョイントの描画
@@ -121,21 +171,23 @@ void drawMotorList(int32_t centerX) {
     Font font;
     font.setHorizontalAlign(Font::HorizontalAlign::Left)
         .setSize(1);
+    const auto& state = robot::CommsManager::getInstance().getState();
 
     for (int32_t i = 0; i < kMaxVisibleMotors; ++i) {
         int32_t motorIdx = g_scrollIndex + i;
-        if (motorIdx >= (int32_t)g_motors.size()) break;
+        if (motorIdx >= (int32_t)state.motors.size()) break;
 
-        const auto& motor = g_motors[motorIdx];
+        const auto& motor = state.motors[motorIdx];
         int32_t y = kHeaderHeight + 20 + (i * kRowHeight);
 
         // 1. ラベル (左端)
-        font(motor.label, Font::Pos(25, y), Palette::White);
+        font(motor.label.c_str(), Font::Pos(25, y), Palette::White);
 
         // 2. 角度数値 (右端)
         float degrees = motor.angleRadians * 180.0f / Math::Pi;
-        String valText = motor.updated ? String(degrees, 1) + "d" : "---"; // degの代わりにd
-        Color valColor = motor.updated ? Palette::Cyan : Palette::Darkgray;
+        // 角度数値の色をトルク状態に合わせて変える
+        Color valColor = motor.updated ? (motor.isTorqueEnabled ? Palette::Cyan : Palette::Orange) : Palette::Darkgray;
+        String valText = motor.updated ? String(degrees, 1) + (motor.isTorqueEnabled ? "T" : "_") : "---";
         
         Font().setHorizontalAlign(Font::HorizontalAlign::Right)
               .setSize(1)
@@ -166,7 +218,7 @@ void drawMotorList(int32_t centerX) {
     // スクロールバーの代わり
     int32_t barY = kHeaderHeight + 10;
     int32_t barH = (System::Height() - kHeaderHeight - 20);
-    float progress = (float)g_scrollIndex / (g_motors.size() - kMaxVisibleMotors);
+    float progress = (float)g_scrollIndex / (state.motors.size() - kMaxVisibleMotors);
     Circle(System::Width() - 10, barY + (progress * barH), 3).draw(Palette::Gray);
 }
 
@@ -175,35 +227,50 @@ void drawMotorList(int32_t centerX) {
 void Main() {
     System::SetBackgroundColor(Palette::Black);
 
-    // Serial2 (Port B) 初期化
-    Serial2.begin(kUartBaudRate, SERIAL_8N1, kPortBRxPin, kPortBTxPin);
-
-    // MsgPacketizer 購読設定
-    // 1. モーター角度配列 (Index 10)
-    MsgPacketizer::subscribe(Serial2, kIndexMotorTelemetry, [](const std::vector<float>& angles) {
-        for (size_t i = 0; i < angles.size() && i < g_motors.size(); ++i) {
-            if (angles[i] > -900.0f) {
-                g_motors[i].angleRadians = angles[i];
-                g_motors[i].updated = true;
-            } else {
-                g_motors[i].updated = false;
-            }
-        }
-    });
-
-    // 2. システム健康状態 (Index 11)
-    MsgPacketizer::subscribe(Serial2, kIndexSystemHealth, [](int32_t health) {
-        g_systemHealth = health;
-    });
+    // 通信初期化
+    robot::CommsManager::getInstance().init(kUartBaudRate, kPortBRxPin, kPortBTxPin);
 
     while (System::Update()) {
-        // MsgPacketizer の更新
-        MsgPacketizer::update();
+        // 通信更新
+        robot::CommsManager::getInstance().update();
+        const auto& state = robot::CommsManager::getInstance().getState();
+        const auto& actions = robot::CommsManager::getInstance().getActions();
+
+        // --- ボタンAの押下状態管理 ---
+        if (Input::getButtonA().pressed()) {
+            g_pressStartTime = millis();
+            g_commandExecuted = false;
+        }
+
+        uint32_t holdTime = 0;
+        if (Input::getButtonA().down()) {
+            holdTime = millis() - g_pressStartTime;
+            
+            // 長押し中かつ未実行の場合
+            if (holdTime >= kHoldThresholdMs && !g_commandExecuted) {
+                if (g_displayMode == DisplayMode::ActionMenu) {
+                    robot::CommsManager::getInstance().sendCommand(actions[g_menuIndex].command);
+                    g_flashTimer = 15;
+                } else {
+                    // ActionMenu以外でも長押しでCLEAR_FAULTSを実行
+                    robot::CommsManager::getInstance().sendCommand("CLEAR_FAULTS");
+                    g_flashTimer = 10;
+                }
+                g_commandExecuted = true;
+            }
+        }
 
         // モード切り替え（ボタンAを離した瞬間）
         if (Input::getButtonA().released()) {
-            if (g_displayMode == DisplayMode::BodyDashboard) g_displayMode = DisplayMode::MotorList;
-            else g_displayMode = DisplayMode::BodyDashboard;
+            // 長押しコマンドが実行されておらず、かつ押下時間が短かった場合のみ切り替え
+            if (!g_commandExecuted && holdTime < kHoldThresholdMs) {
+                if (g_displayMode == DisplayMode::BodyDashboard) g_displayMode = DisplayMode::MotorList;
+                else if (g_displayMode == DisplayMode::MotorList) g_displayMode = DisplayMode::ActionMenu;
+                else g_displayMode = DisplayMode::BodyDashboard;
+            }
+            // リセット
+            g_commandExecuted = false;
+            g_pressStartTime = 0;
         }
 
         // エンコーダーで操作
@@ -211,14 +278,11 @@ void Main() {
         if (encoderDelta != 0) {
             if (g_displayMode == DisplayMode::MotorList) {
                 // 詳細リスト時はスクロール
-                g_scrollIndex = Math::clamp((int32_t)(g_scrollIndex + encoderDelta), 0, (int32_t)g_motors.size() - kMaxVisibleMotors);
+                g_scrollIndex = Math::clamp((int32_t)(g_scrollIndex + encoderDelta), 0, (int32_t)state.motors.size() - kMaxVisibleMotors);
+            } else if (g_displayMode == DisplayMode::ActionMenu) {
+                // メニュー時は項目選択
+                g_menuIndex = (g_menuIndex + (int32_t)encoderDelta + (int32_t)actions.size()) % (int32_t)actions.size();
             }
-        }
-
-        // 長押しでリセットコマンド送信
-        if (Input::getButtonA().pressedDuration(1000)) {
-            MsgPacketizer::send(Serial2, kIndexCommand, String("CLEAR_FAULTS"));
-            Circle(System::Width()/2, System::Height()/2, 20).draw(Palette::Orange);
         }
 
         // 描画
@@ -227,12 +291,31 @@ void Main() {
         
         if (g_displayMode == DisplayMode::BodyDashboard) {
             drawBodyDashboard();
-        } else {
+        } else if (g_displayMode == DisplayMode::MotorList) {
             drawMotorList(centerX);
+        } else {
+            drawActionMenu(centerX);
+        }
+
+        // ホールドメーターの描画 (UIUX: 進行状況の可視化)
+        if (Input::getButtonA().down() && !g_commandExecuted) {
+            float progress = Math::clamp((float)holdTime / kHoldThresholdMs, 0.0f, 1.0f);
+            // 中央ボタンの周囲に円形のプログレスバーを表示 (0~360度)
+            Circle(120, 120, 42).drawArc(4, 0, (int32_t)(progress * 360), Palette::Cyan);
+        }
+
+        // 送信フィードバック（UIUX: 実行したことが一目でわかるフラッシュ）
+        if (g_flashTimer > 0) {
+            Circle(System::Width() / 2, System::Height() / 2, 118).drawFrame(Palette::Orange);
+            g_flashTimer--;
         }
 
         // ヘルプ
-        String helpText = (g_displayMode == DisplayMode::BodyDashboard) ? "BtnA: Detail Mode" : "BtnA: Overview / Dial: Scroll";
+        String helpText;
+        if (g_displayMode == DisplayMode::BodyDashboard) helpText = "BtnA: Detail Mode";
+        else if (g_displayMode == DisplayMode::MotorList) helpText = "BtnA: Menu / Dial: Scroll";
+        else helpText = "BtnA: Overview / Dial: Select";
+
         Font().setHorizontalAlign(Font::HorizontalAlign::Center)
               .setSize(1)
               (helpText, Font::Pos(centerX, System::Height() - 15), Palette::Gray);
