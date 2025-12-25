@@ -52,51 +52,51 @@ void drawHeader(int32_t centerX) {
     const Color pipGreen = Color(30, 255, 30);
     const auto& state = robot::CommsManager::getInstance().getState();
     
-    // 背景の薄いグリッド (透過の代わりに暗い色で)
+    // 背景の薄いグリッド
     for (int i = 0; i < 240; i += 40) {
         Line(i, 0, i, 240).draw(Color(0, 30, 0));
         Line(0, i, 240, i).draw(Color(0, 30, 0));
     }
 
-    // 接続状態インジケータ (左端)
+    // 接続状態インジケータ (最上部中央)
     if (!state.diagnostics.isConnected()) {
-        Font().setHorizontalAlign(Font::HorizontalAlign::Left).setSize(1)
-              ("DISCONNECTED", Font::Pos(10, 5), Palette::Red);
+        Font().setHorizontalAlign(Font::HorizontalAlign::Center).setSize(1)
+              ("!! DISCONNECTED !!", Font::Pos(centerX, 15), Palette::Red);
     } else if (state.diagnostics.errorCount > 0) {
-        Font().setHorizontalAlign(Font::HorizontalAlign::Left).setSize(1)
-              ("COMM ERR", Font::Pos(10, 5), Palette::Orange);
+        Font().setHorizontalAlign(Font::HorizontalAlign::Center).setSize(1)
+              ("COMM ERROR", Font::Pos(centerX, 15), Palette::Orange);
     }
 
-    // システムクラッシュ状態 (左上)
+    // システムクラッシュ状態 (上部左寄り)
     const Color crashColor = (state.crashLatch == 0) ? pipGreen : Palette::Red;
     Font().setHorizontalAlign(Font::HorizontalAlign::Left).setSize(1)
-          ((state.crashLatch == 0 ? "SYS:OK" : "SYS:CRASH"), Font::Pos(20, 20), crashColor);
+          ((state.crashLatch == 0 ? "SYS:OK" : "CRASH"), Font::Pos(55, 30), crashColor);
 
-    // ポート障害インジケータ (中央)
+    // ポート障害インジケータ (中央やや上)
     const char* portLabels[] = {"S", "H", "L", "R"};
     for (size_t i = 0; i < state.portFaults.size(); ++i) {
         Color c = (state.portFaults[i] == 0) ? pipGreen : Palette::Red;
         Font().setHorizontalAlign(Font::HorizontalAlign::Center).setSize(1)
-              (portLabels[i], Font::Pos(95 + i * 15, 20), c);
+              (portLabels[i], Font::Pos(95 + i * 15, 30), c);
     }
 
-    // システム全体のトルク設定 (右上)
+    // システム全体のトルク設定 (上部右寄り)
     const Color armColor = (state.persistentArmState == 1) ? Palette::Yellow : Palette::Gray;
     Font().setHorizontalAlign(Font::HorizontalAlign::Right).setSize(1)
-          ((state.persistentArmState == 1 ? "ARM" : "DISARM"), Font::Pos(220, 20), armColor);
+          ((state.persistentArmState == 1 ? "ARM" : "DISARM"), Font::Pos(185, 30), armColor);
     
     String modeName;
-    if (g_displayMode == DisplayMode::BodyDashboard) modeName = "-- STATUS OVERVIEW --";
-    else if (g_displayMode == DisplayMode::MotorList) modeName = "-- SENSOR DETAIL --";
-    else modeName = "-- COMMAND MENU --";
+    if (g_displayMode == DisplayMode::BodyDashboard) modeName = "- STATUS -";
+    else if (g_displayMode == DisplayMode::MotorList) modeName = "- SENSORS -";
+    else modeName = "- COMMAND -";
 
     Font().setHorizontalAlign(Font::HorizontalAlign::Center)
           .setSize(1)
-          (modeName, Font::Pos(centerX, 45), pipGreen);
+          (modeName, Font::Pos(centerX, 50), pipGreen);
 }
 
 void drawActionMenu(int32_t centerX) {
-    const int32_t startY = 70;
+    const int32_t startY = 75;
     const int32_t itemHeight = 35;
     const auto& actions = robot::CommsManager::getInstance().getActions();
 
@@ -105,29 +105,29 @@ void drawActionMenu(int32_t centerX) {
         int32_t y = startY + (i * itemHeight);
         bool isSelected = (i == g_menuIndex);
 
-        // 背景ハイライト (UIUX: 選択状態を明確に)
+        // 背景ハイライト (円形に合わせて幅を狭める)
         if (isSelected) {
-            Rect(20, y - 5, 200, 30).drawFrame(action.color); // 枠線でハイライト
-            Rect(20, y - 5, 4, 30).draw(action.color);      // 左側にアクセントバー
+            Rect(45, y - 5, 150, 30).drawFrame(action.color); 
+            Rect(45, y - 5, 4, 30).draw(action.color);      
         }
 
         Color textColor = isSelected ? Palette::White : Palette::Gray;
         Font().setHorizontalAlign(Font::HorizontalAlign::Left)
               .setSize(1)
-              (action.label.c_str(), Font::Pos(35, y), textColor);
+              (action.label.c_str(), Font::Pos(60, y), textColor);
 
         if (isSelected) {
             // 決定ガイド
             Font().setHorizontalAlign(Font::HorizontalAlign::Right)
                   .setSize(1)
-                  ("HOLD >", Font::Pos(210, y), action.color);
+                  ("HOLD >", Font::Pos(185, y), action.color);
         }
     }
 
-    // 操作ガイド
+    // 操作ガイド (少し上にずらす)
     Font().setHorizontalAlign(Font::HorizontalAlign::Center)
           .setSize(1)
-          ("Dial: Select / Btn Hold: Execute", Font::Pos(centerX, 200), Palette::Darkgray);
+          ("Dial: Select / Hold: Run", Font::Pos(centerX, 215), Palette::Darkgray);
 }
 
 void drawBodyDashboard() {
@@ -178,48 +178,39 @@ void drawMotorList(int32_t centerX) {
         if (motorIdx >= (int32_t)state.motors.size()) break;
 
         const auto& motor = state.motors[motorIdx];
-        int32_t y = kHeaderHeight + 20 + (i * kRowHeight);
+        int32_t y = kHeaderHeight + 25 + (i * kRowHeight);
 
-        // 1. ラベル (左端)
-        font(motor.label.c_str(), Font::Pos(25, y), Palette::White);
+        // 1. ラベル (円形の内側に寄せる)
+        font(motor.label.c_str(), Font::Pos(40, y), Palette::White);
 
-        // 2. 角度数値 (右端)
+        // 2. 角度数値 (右側も内側に寄せる)
         float degrees = motor.angleRadians * 180.0f / Math::Pi;
-        // 角度数値の色をトルク状態に合わせて変える
         Color valColor = motor.updated ? (motor.isTorqueEnabled ? Palette::Cyan : Palette::Orange) : Palette::Darkgray;
         String valText = motor.updated ? String(degrees, 1) + (motor.isTorqueEnabled ? "T" : "_") : "---";
         
         Font().setHorizontalAlign(Font::HorizontalAlign::Right)
               .setSize(1)
-              (valText, Font::Pos(System::Width() - 25, y), valColor);
+              (valText, Font::Pos(centerX + 80, y), valColor);
         
         // 3. 視覚的インジケータ（中央付近）
-        // 範囲を -PI/4 ~ PI/4 (-45deg ~ 45deg) に設定
         constexpr float kRangeDeg = 45.0f;
-        int32_t barX = 110;
-        int32_t barWidth = 60;
+        int32_t barX = 115;
+        int32_t barWidth = 40;
         int32_t barY = y + 6;
         
-        // 背景（溝）
         Rect(barX, barY, barWidth, 6).draw(Color(40, 40, 40));
-        
-        // 正規化 (0.0 ~ 1.0)
         float normalized = (degrees + kRangeDeg) / (kRangeDeg * 2.0f);
         float progress = Math::clamp(normalized, 0.0f, 1.0f);
-        
-        // アクティブなバー（更新されていれば黄色、いなければ暗い赤）
         Color barColor = motor.updated ? Palette::Yellow : Color(100, 0, 0);
         Rect(barX, barY, (int32_t)(progress * barWidth), 6).draw(barColor);
-        
-        // センターマーカー (0度位置)
         Rect(barX + barWidth/2 - 1, barY - 2, 2, 10).draw(Palette::White);
     }
 
-    // スクロールバーの代わり
-    int32_t barY = kHeaderHeight + 10;
-    int32_t barH = (System::Height() - kHeaderHeight - 20);
+    // スクロールバー
+    int32_t barY = kHeaderHeight + 15;
+    int32_t barH = (System::Height() - kHeaderHeight - 40);
     float progress = (float)g_scrollIndex / (state.motors.size() - kMaxVisibleMotors);
-    Circle(System::Width() - 10, barY + (progress * barH), 3).draw(Palette::Gray);
+    Circle(System::Width() - 25, barY + (progress * barH), 3).draw(Palette::Gray);
 }
 
 } // namespace
@@ -310,15 +301,15 @@ void Main() {
             g_flashTimer--;
         }
 
-        // ヘルプ
+        // ヘルプ (円形に合わせて位置調整)
         String helpText;
-        if (g_displayMode == DisplayMode::BodyDashboard) helpText = "BtnA: Detail Mode";
+        if (g_displayMode == DisplayMode::BodyDashboard) helpText = "BtnA: Detail";
         else if (g_displayMode == DisplayMode::MotorList) helpText = "BtnA: Menu / Dial: Scroll";
         else helpText = "BtnA: Overview / Dial: Select";
 
         Font().setHorizontalAlign(Font::HorizontalAlign::Center)
               .setSize(1)
-              (helpText, Font::Pos(centerX, System::Height() - 15), Palette::Gray);
+              (helpText, Font::Pos(centerX, System::Height() - 25), Palette::Gray);
 
         ClearPrint();
         drawPrint();
