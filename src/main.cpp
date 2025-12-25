@@ -154,16 +154,30 @@ void drawBodyDashboard() {
         const auto& pos = g_bodyCoords[i];
         
         Color dotColor;
+        bool hasError = (motor.errorStatus != 0);
+        
         if (!motor.updated) dotColor = Color(80, 20, 20); 
-        else if (state.crashLatch != 0) dotColor = Palette::Red;
+        else if (state.crashLatch != 0 || hasError) dotColor = Palette::Red;
         else dotColor = pipBrightGreen;
         
         // ジョイントの描画
         if (motor.updated) {
-            float pulse = (float)sin(millis() * 0.005f) * 2.0f;
-            Circle(pos.x, pos.y, 4 + (int32_t)abs(pulse)).drawFrame(pipBrightGreen);
+            float pulseScale = hasError ? 3.0f : 1.5f; // エラー時はより激しくパルス
+            float pulseSpeed = hasError ? 0.015f : 0.005f;
+            float pulse = (float)sin(millis() * pulseSpeed) * pulseScale;
+            
+            Color ringColor = hasError ? Palette::Red : pipBrightGreen;
+            Circle(pos.x, pos.y, 4 + (int32_t)abs(pulse)).drawFrame(ringColor);
+
+            // トルクOFF時は中抜きにする
+            if (motor.isTorqueEnabled) {
+                Rect(pos.x - 2, pos.y - 2, 4, 4).draw(dotColor);
+            } else {
+                Rect(pos.x - 2, pos.y - 2, 4, 4).drawFrame(dotColor);
+            }
+        } else {
+            Rect(pos.x - 2, pos.y - 2, 4, 4).draw(dotColor);
         }
-        Rect(pos.x - 2, pos.y - 2, 4, 4).draw(dotColor);
     }
 }
 
@@ -179,31 +193,68 @@ void drawMotorList(int32_t centerX) {
 
         const auto& motor = state.motors[motorIdx];
         int32_t y = kHeaderHeight + 25 + (i * kRowHeight);
+        bool hasError = (motor.errorStatus != 0);
 
-        // 1. ラベル (円形の内側に寄せる)
-        font(motor.label.c_str(), Font::Pos(40, y), Palette::White);
+        // 1. ラベル (エラー時は赤色)
+        Color labelColor = hasError ? Palette::Red : Palette::White;
+        font(motor.label.c_str(), Font::Pos(40, y), labelColor);
 
-        // 2. 角度数値 (右側も内側に寄せる)
+        // 2. 角度数値
         float degrees = motor.angleRadians * 180.0f / Math::Pi;
-        Color valColor = motor.updated ? (motor.isTorqueEnabled ? Palette::Cyan : Palette::Orange) : Palette::Darkgray;
-        String valText = motor.updated ? String(degrees, 1) + (motor.isTorqueEnabled ? "T" : "_") : "---";
+        Color valColor;
+        if (!motor.updated) valColor = Palette::Darkgray;
+        else if (hasError) valColor = Palette::Red;
+        else if (motor.isTorqueEnabled) valColor = Palette::Cyan;
+        else valColor = Palette::Orange;
+
+        String valText;
+        if (!motor.updated) valText = "---";
+        else {
+            valText = String(degrees, 0); // 整数表示でスペース節約
+            if (hasError) valText += "!";
+            else valText += (motor.isTorqueEnabled ? "T" : "f");
+        }
         
         Font().setHorizontalAlign(Font::HorizontalAlign::Right)
               .setSize(1)
-              (valText, Font::Pos(centerX + 80, y), valColor);
+              (valText, Font::Pos(centerX + 85, y), valColor);
         
-        // 3. 視覚的インジケータ（中央付近）
+        // 3. 視覚的インジケータ
         constexpr float kRangeDeg = 45.0f;
-        int32_t barX = 115;
-        int32_t barWidth = 40;
+        int32_t barX = 110;
+        int32_t barWidth = 35;
         int32_t barY = y + 6;
         
         Rect(barX, barY, barWidth, 6).draw(Color(40, 40, 40));
         float normalized = (degrees + kRangeDeg) / (kRangeDeg * 2.0f);
         float progress = Math::clamp(normalized, 0.0f, 1.0f);
-        Color barColor = motor.updated ? Palette::Yellow : Color(100, 0, 0);
+        
+        Color barColor;
+        if (!motor.updated) barColor = Color(100, 0, 0);
+        else if (hasError) barColor = Palette::Red;
+        else barColor = Palette::Yellow;
+
         Rect(barX, barY, (int32_t)(progress * barWidth), 6).draw(barColor);
         Rect(barX + barWidth/2 - 1, barY - 2, 2, 10).draw(Palette::White);
+
+        // 4. ステータスアイコン (右端付近)
+        if (motor.updated && motor.shutdownStatus != 0) {
+            Font().setHorizontalAlign(Font::HorizontalAlign::Left).setSize(1)
+                  ("SD", Font::Pos(centerX + 90, y), Palette::Orange);
+        }
+
+        // 5. エラー詳細 (エラーがある場合のみ、ラベルの下に小さく表示)
+        if (hasError) {
+            String errDetail = "";
+            if (motor.errorStatus & 0x01) errDetail += "VOLT ";
+            if (motor.errorStatus & 0x04) errDetail += "TEMP ";
+            if (motor.errorStatus & 0x08) errDetail += "ENC ";
+            if (motor.errorStatus & 0x10) errDetail += "SHOCK ";
+            if (motor.errorStatus & 0x20) errDetail += "LOAD ";
+
+            Font().setHorizontalAlign(Font::HorizontalAlign::Left).setSize(1)
+                  (errDetail, Font::Pos(45, y + 10), Palette::Red);
+        }
     }
 
     // スクロールバー
