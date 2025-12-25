@@ -11,6 +11,8 @@ struct MotorInfo {
     kstd::string label;
     float angleRadians = 0.0f;
     bool isTorqueEnabled = false;
+    uint8_t errorStatus = 0;    // Register 70 (Hardware Error Status)
+    uint8_t shutdownStatus = 0; // Register 63 (Shutdown)
     bool updated = false;
     uint32_t lastUpdateMs = 0;
 };
@@ -100,7 +102,8 @@ private:
             m_state.diagnostics.lastTelemetryMs = millis();
             m_state.diagnostics.msgCount++;
 
-            size_t motorCount = packedData.size() / 2;
+            const size_t valuesPerMotor = 4;
+            size_t motorCount = packedData.size() / valuesPerMotor;
             if (motorCount > m_state.motors.size()) {
                 m_state.diagnostics.errorCount++;
                 m_state.diagnostics.lastError = "Motor data size mismatch";
@@ -108,12 +111,19 @@ private:
             }
 
             for (size_t i = 0; i < motorCount; ++i) {
-                float angle = packedData[i * 2];
-                bool torque = (packedData[i * 2 + 1] > 0.5f);
+                size_t baseIdx = i * valuesPerMotor;
+                float angle = packedData[baseIdx];
+                float torque = packedData[baseIdx + 1];
+                float error = packedData[baseIdx + 2];
+                float shutdown = packedData[baseIdx + 3];
                 
                 if (angle > -900.0f) {
                     m_state.motors[i].angleRadians = angle;
-                    m_state.motors[i].isTorqueEnabled = torque;
+                    m_state.motors[i].isTorqueEnabled = (torque > 0.5f);
+                    
+                    if (error >= 0.0f) m_state.motors[i].errorStatus = static_cast<uint8_t>(error);
+                    if (shutdown >= 0.0f) m_state.motors[i].shutdownStatus = static_cast<uint8_t>(shutdown);
+                    
                     m_state.motors[i].updated = true;
                     m_state.motors[i].lastUpdateMs = millis();
                 } else {
