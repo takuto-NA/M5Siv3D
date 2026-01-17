@@ -6,6 +6,12 @@
 
 namespace robot {
 
+// =============================================================================
+// Comms Protocol Notes
+// - This module subscribes/sends MsgPacketizer packets via Serial2.
+// - Index / payload layout is documented in: docs/CommsProtocol.md
+// =============================================================================
+
 // モーター情報
 struct MotorInfo {
     kstd::string label;
@@ -190,7 +196,11 @@ private:
             m_state.diagnostics.lastTelemetryMs = millis();
             m_state.diagnostics.msgCount++;
 
-            const size_t valuesPerMotor = 4;
+            // Payload layout (per motor):
+            // [ angleRad, torqueFlag, errorStatus, shutdownStatus ]
+            // - angleRad <= -900.0f is treated as "invalid / not updated"
+            constexpr size_t valuesPerMotor = 4;
+            constexpr float kInvalidAngleSentinel = -900.0f;
             size_t motorCount = packedData.size() / valuesPerMotor;
             if (motorCount > m_state.motors.size()) {
                 m_state.diagnostics.errorCount++;
@@ -205,7 +215,7 @@ private:
                 float error = packedData[baseIdx + 2];
                 float shutdown = packedData[baseIdx + 3];
                 
-                if (angle > -900.0f) {
+                if (angle > kInvalidAngleSentinel) {
                     m_state.motors[i].angleRadians = angle;
                     m_state.motors[i].isTorqueEnabled = (torque > 0.5f);
                     
@@ -231,6 +241,8 @@ private:
                 return;
             }
 
+            // Layout (minimum):
+            // [0] crashLatch, [1] persistentArmState, [2..5] portFaults(4)
             m_state.crashLatch = healthData[0];
             m_state.persistentArmState = healthData[1];
 
@@ -239,7 +251,8 @@ private:
                 m_state.portFaults[i - 2] = healthData[i];
             }
 
-            // 録画エンジンとグループモードのパース (7..12)
+            // Extended layout (requires size >= 13):
+            // [7] engineRunning, [8..12] groupModes(5)
             if (healthData.size() >= 13) {
                 m_state.engineRunning = healthData[7];
                 for (int i = 0; i < 5; ++i) {
@@ -253,6 +266,7 @@ private:
     kstd::vector<ActionItem> m_actions;
     
     // インデックス定義
+    // See docs/CommsProtocol.md for payload definitions.
     static constexpr uint8_t kIndexMotorTelemetry = 10;
     static constexpr uint8_t kIndexSystemHealth = 11;
     static constexpr uint8_t kIndexCommand = 0;
