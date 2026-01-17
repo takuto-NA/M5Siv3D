@@ -22,6 +22,8 @@ struct ActionItem {
     kstd::string label;
     kstd::string command;
     Color color;
+    int32_t groupIdx; // -1: Global/System, 0:HIP, 1:HEAD, 2:EYE, 3:ARM_L, 4:ARM_R
+    kstd::string category;
 };
 
 // 診断データ
@@ -79,35 +81,103 @@ public:
         MsgPacketizer::update();
     }
     
+    // スロットを指定して切り替えるヘルパー
+    void selectSlot(int32_t slot) {
+        kstd::string cmd = "REC_SLOT:" + kstd::to_string(slot);
+        sendCommand(cmd);
+    }
+
+    // 名前指定でモーションをロードするヘルパー
+    void loadMotion(const kstd::string& name) {
+        kstd::string cmd = "LOAD_MOTION:" + name;
+        sendCommand(cmd);
+    }
+
     const RobotState& getState() const { return m_state; }
     const kstd::vector<ActionItem>& getActions() const { return m_actions; }
 
 private:
     CommsManager() {
         // モーターリストの初期化
-        m_state.motors = {
-            {"HipL"}, {"HipR"}, {"HipTwist"},
-            {"NeckL"}, {"NeckR"}, {"NeckTwist"}, {"Eyelid"},
-            {"LeftArm01"}, {"LeftArm02"}, {"LeftArm03"}, {"LeftArm04"}, {"LeftArm05"}, {"LeftArm06"}, {"LeftArm07"},
-            {"RightArm01"}, {"RightArm02"}, {"RightArm03"}, {"RightArm04"}, {"RightArm05"}, {"RightArm06"}, {"RightArm07"}
-        };
+        m_state.motors.clear();
+        m_state.motors.push_back({"HipL"});
+        m_state.motors.push_back({"HipR"});
+        m_state.motors.push_back({"HipTwist"});
+        m_state.motors.push_back({"NeckL"});
+        m_state.motors.push_back({"NeckR"});
+        m_state.motors.push_back({"NeckTwist"});
+        m_state.motors.push_back({"Eyelid"});
+        m_state.motors.push_back({"LeftArm01"});
+        m_state.motors.push_back({"LeftArm02"});
+        m_state.motors.push_back({"LeftArm03"});
+        m_state.motors.push_back({"LeftArm04"});
+        m_state.motors.push_back({"LeftArm05"});
+        m_state.motors.push_back({"LeftArm06"});
+        m_state.motors.push_back({"LeftArm07"});
+        m_state.motors.push_back({"RightArm01"});
+        m_state.motors.push_back({"RightArm02"});
+        m_state.motors.push_back({"RightArm03"});
+        m_state.motors.push_back({"RightArm04"});
+        m_state.motors.push_back({"RightArm05"});
+        m_state.motors.push_back({"RightArm06"});
+        m_state.motors.push_back({"RightArm07"});
 
         // アクションの初期化
-        m_actions = {
-            {"TORQUE ON", "TORQUE_ON", Palette::Cyan},
-            {"TORQUE OFF", "TORQUE_OFF", Palette::Yellow},
-            {"HIP ON", "TORQUE_ON:HIP", Palette::Deepskyblue},
-            {"HEAD ON", "TORQUE_ON:HEAD", Palette::Deepskyblue},
-            {"L-ARM ON", "TORQUE_ON:ARM_L", Palette::Deepskyblue},
-            {"R-ARM ON", "TORQUE_ON:ARM_R", Palette::Deepskyblue},
-            {"ARMS ON", "TORQUE_ON:ARMS", Palette::Deepskyblue},
-            {"CLEAR FAULTS", "CLEAR_FAULTS", Palette::Orange},
-            {"RESET CRASH", "CLEAR_CRASH_LATCH", Palette::Orangered},
-            {"REBOOT SYSTEM", "REBOOT", Palette::Red},
-            {"ARMS REC", "REC_PRESET:ARMS_REC", Palette::Magenta},
-            {"EYELID REC", "REC_PRESET:EYELID_REC", Palette::Purple},
-            {"ALL PLAY", "REC_PRESET:ALL_PLAY", Palette::Green}
-        };
+        m_actions.clear();
+        // --- SYSTEM ---
+        m_actions.push_back({"CLEAR FAULTS", "CLEAR_FAULTS", Palette::Orange, -1, "SYS"});
+        m_actions.push_back({"RESET CRASH", "CLEAR_CRASH_LATCH", Palette::Orangered, -1, "SYS"});
+        m_actions.push_back({"PLAY START", "PLAY_START", Palette::Limegreen, -1, "SYS"});
+        m_actions.push_back({"REC START", "REC_START", Palette::Red, -1, "SYS"});
+        m_actions.push_back({"MOTION STOP", "MOTION_STOP", Palette::Lightgray, -1, "SYS"});
+        m_actions.push_back({"MOTION SAVE", "MOTION_SAVE", Palette::Deepskyblue, -1, "SYS"});
+        m_actions.push_back({"LOAD LAST", "LOAD_LAST", Palette::Yellow, -1, "SYS"});
+        m_actions.push_back({"REBOOT", "REBOOT", Palette::Red, -1, "SYS"});
+
+        // --- SLOTS ---
+        m_actions.push_back({"SLOT 0", "REC_SLOT:0", Palette::Cyan, -1, "SLOTS"});
+        m_actions.push_back({"SLOT 1", "REC_SLOT:1", Palette::Cyan, -1, "SLOTS"});
+        m_actions.push_back({"SLOT 2", "REC_SLOT:2", Palette::Cyan, -1, "SLOTS"});
+        m_actions.push_back({"SLOT 3", "REC_SLOT:3", Palette::Cyan, -1, "SLOTS"});
+        m_actions.push_back({"SLOT 4", "REC_SLOT:4", Palette::Cyan, -1, "SLOTS"});
+
+        // --- GLOBAL ---
+        m_actions.push_back({"ALL ON", "TORQUE_ON", Palette::Cyan, -1, "ALL"});
+        m_actions.push_back({"ALL OFF", "TORQUE_OFF", Palette::Lightgray, -1, "ALL"});
+        m_actions.push_back({"ALL STIFFEN", "STIFFEN:ALL", Palette::White, -1, "ALL"});
+        m_actions.push_back({"ALL PLAY", "REC_PRESET:ALL_PLAY", Palette::Deepskyblue, -1, "ALL"});
+        m_actions.push_back({"ALL REC", "REC_PRESET:ALL_REC", Palette::Red, -1, "ALL"});
+        m_actions.push_back({"ALL OFF", "REC_PRESET:ALL_OFF", Palette::Gray, -1, "ALL"});
+
+        // --- L-ARM ---
+        m_actions.push_back({"L-ARM ON", "TORQUE_ON:ARM_L", Palette::Cyan, 3, "L-ARM"});
+        m_actions.push_back({"L-ARM STIFFEN", "STIFFEN:ARM_L", Palette::White, 3, "L-ARM"});
+        m_actions.push_back({"L-ARM REC", "REC_PRESET:ARM_L_REC", Palette::Red, 3, "L-ARM"});
+        m_actions.push_back({"L-ARM OFF", "TORQUE_OFF:ARM_L", Palette::Gray, 3, "L-ARM"});
+
+        // --- R-ARM ---
+        m_actions.push_back({"R-ARM ON", "TORQUE_ON:ARM_R", Palette::Cyan, 4, "R-ARM"});
+        m_actions.push_back({"R-ARM STIFFEN", "STIFFEN:ARM_R", Palette::White, 4, "R-ARM"});
+        m_actions.push_back({"R-ARM REC", "REC_PRESET:ARM_R_REC", Palette::Red, 4, "R-ARM"});
+        m_actions.push_back({"R-ARM OFF", "TORQUE_OFF:ARM_R", Palette::Gray, 4, "R-ARM"});
+
+        // --- ARMS ---
+        m_actions.push_back({"ARMS REC", "REC_PRESET:ARMS_REC", Palette::Red, -1, "BODY"});
+
+        // --- HIP / HEAD ---
+        m_actions.push_back({"HIP ON", "TORQUE_ON:HIP", Palette::Cyan, 0, "BODY"});
+        m_actions.push_back({"HIP STIFFEN", "STIFFEN:HIP", Palette::White, 0, "BODY"});
+        m_actions.push_back({"HIP REC", "REC_PRESET:HIP_REC", Palette::Red, 0, "BODY"});
+        m_actions.push_back({"HIP OFF", "TORQUE_OFF:HIP", Palette::Gray, 0, "BODY"});
+
+        m_actions.push_back({"HEAD ON", "TORQUE_ON:HEAD", Palette::Cyan, 1, "BODY"});
+        m_actions.push_back({"HEAD STIFFEN", "STIFFEN:HEAD", Palette::White, 1, "BODY"});
+        m_actions.push_back({"HEAD REC", "REC_PRESET:HEAD_REC", Palette::Red, 1, "BODY"});
+        m_actions.push_back({"HEAD OFF", "TORQUE_OFF:HEAD", Palette::Gray, 1, "BODY"});
+
+        m_actions.push_back({"EYE ON", "TORQUE_ON:EYELID", Palette::Cyan, 2, "BODY"});
+        m_actions.push_back({"EYE REC", "REC_PRESET:EYELID_REC", Palette::Red, 2, "BODY"});
+        m_actions.push_back({"EYE OFF", "TORQUE_OFF:EYELID", Palette::Gray, 2, "BODY"});
     }
     
     ~CommsManager() = default;

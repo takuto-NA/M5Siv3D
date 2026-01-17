@@ -134,13 +134,68 @@ void drawHeader(int32_t centerX) {
           (modeName, Font::Pos(centerX, 50), pipGreen);
 }
 
-void drawActionMenu(int32_t centerX) {
-    const int32_t startY = 75;
-    const int32_t itemHeight = 35;
-    const int32_t maxVisible = 4;
-    const auto& actions = robot::CommsManager::getInstance().getActions();
+void drawMiniSkeleton(int32_t x, int32_t y, int32_t highlightGroup) {
+    const Color pipDarkGreen = Color(0, 80, 0);
+    const Color pipBrightGreen = Color(30, 255, 30);
+    const auto& state = robot::CommsManager::getInstance().getState();
 
-    // スクロール位置の計算 (選択中のアイテムが中央付近に来るように)
+    // スケールを小さく (0.4倍程度)
+    auto toMini = [&](int16_t bx, int16_t by) {
+        return Math::Vec2i(x + (bx - 120) * 4 / 10, y + (by - 120) * 4 / 10);
+    };
+
+    // 骨格ライン
+    Line(toMini(120, 70), toMini(120, 160)).draw(pipDarkGreen);
+    Line(toMini(90, 110), toMini(150, 110)).draw(pipDarkGreen);
+    Line(toMini(120, 160), toMini(105, 180)).draw(pipDarkGreen);
+    Line(toMini(120, 160), toMini(135, 180)).draw(pipDarkGreen);
+
+    // 各グループの代表点
+    struct GroupPoint { int32_t idx; int16_t bx, by; };
+    const GroupPoint groupPoints[] = {
+        {0, 120, 170}, // HIP
+        {1, 120, 80},  // HEAD
+        {2, 120, 55},  // EYE
+        {3, 60, 130},  // ARM_L
+        {4, 180, 130}  // ARM_R
+    };
+
+    for (const auto& gp : groupPoints) {
+        Math::Vec2i p = toMini(gp.bx, gp.by);
+        bool isHighlighted = (gp.idx == highlightGroup);
+        int32_t mode = state.groupModes[gp.idx];
+        
+        Color c = pipDarkGreen;
+        if (mode == 2) c = Palette::Red;       // REC
+        else if (mode == 1) c = Palette::Cyan; // PLAY
+        else if (isHighlighted) c = pipBrightGreen;
+
+        if (isHighlighted) {
+            float pulse = (float)sin(millis() * 0.01f) * 3.0f;
+            Circle(p, 5 + (int32_t)abs(pulse)).drawFrame(pipBrightGreen);
+        }
+
+        Circle(p, 3).draw(c);
+    }
+}
+
+void drawActionMenu(int32_t centerX) {
+    const int32_t startY = 85;
+    const int32_t itemHeight = 28;
+    const int32_t maxVisible = 5;
+    const auto& actions = robot::CommsManager::getInstance().getActions();
+    const auto& state = robot::CommsManager::getInstance().getState();
+
+    // ミニスケルトンの表示 (右上)
+    drawMiniSkeleton(200, 70, actions[g_menuIndex].groupIdx);
+
+    // カテゴリとステータスの表示 (左上)
+    const robot::ActionItem& currentAction = actions[g_menuIndex];
+    String catText = "CAT: " + String(currentAction.category.c_str());
+    Font().setHorizontalAlign(Font::HorizontalAlign::Left).setSize(1)
+          (catText, Font::Pos(30, 65), Palette::Gray);
+
+    // スクロール位置の計算
     int32_t scrollOffset = 0;
     if ((int32_t)actions.size() > maxVisible) {
         scrollOffset = g_menuIndex - (maxVisible / 2);
@@ -153,42 +208,50 @@ void drawActionMenu(int32_t centerX) {
         int32_t y = startY + (i * itemHeight);
         bool isSelected = (idx == g_menuIndex);
 
+        // カテゴリの変わり目にライン
+        if (idx > 0 && actions[idx].category != actions[idx-1].category) {
+            Line(30, y - 4, 160, y - 4).draw(Color(40, 40, 40));
+        }
+
         // 背景ハイライト
         if (isSelected) {
-            Rect(45, y - 5, 150, 30).drawFrame(action.color); 
-            Rect(45, y - 5, 4, 30).draw(action.color);
+            Rect(25, y - 4, 165, 24).drawFrame(action.color); 
+            Rect(25, y - 4, 3, 24).draw(action.color);
         }
 
         Color textColor = isSelected ? Palette::White : Palette::Gray;
         
-        // 録画プリセットにはアイコン代わりの印を付ける
-        if (action.command.find("REC_PRESET") == 0) {
-            Circle(52, y + 10, 3).draw(isSelected ? Palette::Red : Palette::Darkred);
+        // アイコン的表示
+        if (action.command.find("REC") != kstd::string::npos) {
+            Circle(32, y + 8, 3).draw(isSelected ? Palette::Red : Palette::Darkred);
+        } else if (action.command.find("TORQUE_ON") != kstd::string::npos) {
+            Rect(29, y + 5, 6, 6).draw(isSelected ? Palette::Cyan : Palette::Gray);
         }
 
         Font().setHorizontalAlign(Font::HorizontalAlign::Left)
               .setSize(1)
-              (action.label.c_str(), Font::Pos(60, y), textColor);
+              (action.label.c_str(), Font::Pos(42, y), textColor);
 
         if (isSelected) {
-            // 決定ガイド
+            // 決定ガイドを短く
             Font().setHorizontalAlign(Font::HorizontalAlign::Right)
                   .setSize(1)
-                  ("HOLD >", Font::Pos(185, y), action.color);
+                  (">>", Font::Pos(185, y), action.color);
         }
     }
 
-    // スクロールインジケータ (右側)
+    // スクロールインジケータ (中央右寄り)
     if ((int32_t)actions.size() > maxVisible) {
         float barH = (maxVisible * itemHeight);
         float progress = (float)scrollOffset / (actions.size() - maxVisible);
-        Circle(System::Width() - 25, startY + (progress * (barH - 10)), 2).draw(Palette::Gray);
+        Rect(195, startY, 2, barH).draw(Color(20, 20, 20));
+        Rect(195, startY + (int32_t)(progress * (barH - 10)), 2, 10).draw(Palette::Gray);
     }
 
     // 操作ガイド
     Font().setHorizontalAlign(Font::HorizontalAlign::Center)
           .setSize(1)
-          ("Dial: Select / Hold: Execute", Font::Pos(centerX, 215), Palette::Darkgray);
+          ("Dial: Select / Hold: Execute", Font::Pos(centerX, 220), Palette::Darkgray);
 }
 
 void drawBodyDashboard() {
