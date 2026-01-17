@@ -2,6 +2,10 @@
 // M5Dial MsgPacketizer Telemetry Viewer (M5Siv3D)
 // - Teensy 4.1 からのモーター角度(21個)と健康状態を受信し可視化する
 //
+// NOTE:
+// - This file is a demo/app entrypoint for PlatformIO in this repository.
+// - The library itself is provided via `M5Siv3D.h` (root) / `src/M5Siv3D.h`.
+// - Comms index/payload layout is documented in `docs/CommsProtocol.md`.
 
 #include "M5Siv3D.h"
 #include "SafeKiboSTL.hpp"

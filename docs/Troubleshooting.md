@@ -2,6 +2,12 @@
 
 このドキュメントは、M5Dial + PlatformIO + M5Siv3D で実際に発生した問題と、再発防止のための手順をまとめたものです。
 
+**関連ドキュメント（入口）**:
+
+- `docs/Quickstart.md`（最短で動かす手順）
+- `docs/DebugScripts.md`（Pythonでの疎通/切り分け）
+- `docs/DevicesAndBuildMatrix.md`（デバイス差分とビルド要点）
+
 ### 1) 画面が点滅する（リセットループ）
 
 - **症状**: 画面が点滅し続ける / シリアルに `Guru Meditation Error` が出る
