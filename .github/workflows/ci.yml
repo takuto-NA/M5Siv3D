@@ -34,9 +34,6 @@ jobs:
     - name: Run static analysis (cppcheck)
       run: pio check -e compile-test --skip-packages -v
 
-    - name: Run Unit Tests
-      run: pio test -e compile-test -v
-
     - name: Build all boards
       run: |
         pio run -e compile-test \

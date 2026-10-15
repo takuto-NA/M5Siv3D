@@ -4,11 +4,10 @@ A Siv3D-inspired graphics library for M5Stack devices.
 
 ## Description
 
-M5Siv3D provides an OpenSiv3D-inspired API for M5Stack devices, offering familiar and intuitive graphics and input handling interfaces while maintaining full compatibility with M5Unified's powerful features.
+OpenSiv3D-style drawing and input for M5Stack, built on M5Unified.
 
 ## Features
 
-- Simple and intuitive graphics API
 - Vector mathematics support
 - Color manipulation with RGB and HSV
 - Text rendering with multiple fonts

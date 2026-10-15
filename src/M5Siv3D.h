@@ -1,17 +1,10 @@
 /*
  * M5Siv3D
- * https://github.com/chobby/M5Siv3D
+ * https://github.com/takuto-NA/M5Siv3D
  * Copyright (c) 2024 chobby
  * Licensed under MIT License
  *
- * M5Siv3D - A wrapper library for M5Unified
- *
- * This library provides an OpenSiv3D-inspired API for M5Stack devices,
- * offering familiar and intuitive graphics and input handling interfaces
- * while maintaining full compatibility with M5Unified's powerful features.
- *
- * Designed to make creative coding on M5Stack devices more accessible
- * through a simplified, yet powerful programming interface.
+ * OpenSiv3D-style drawing and input for M5Stack, built on M5Unified.
  */
 
 #pragma once
@@ -82,12 +75,4 @@ void loop();
 #endif
 
 class M5Siv3D {
-public:
-    inline M5Siv3D() {
-        // コンストラクタの実装
-    }
-    
-    inline ~M5Siv3D() {
-        // デストラクタの実装
-    }
-}; 
+};
