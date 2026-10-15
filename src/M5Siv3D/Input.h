@@ -3,6 +3,11 @@
 #include <M5Unified.h>
 #include "Math.h"
 
+#ifdef USE_M5_DIAL
+#include <M5Dial.h>
+#include <optional>
+#endif
+
 namespace Input
 {
     class ButtonState
@@ -25,6 +30,48 @@ namespace Input
     inline ButtonState ButtonA{&M5.BtnA};
     inline ButtonState ButtonB{&M5.BtnB};
     inline ButtonState ButtonC{&M5.BtnC};
+
+    inline ButtonState &getButtonA() { return ButtonA; }
+    inline ButtonState &getButtonB() { return ButtonB; }
+    inline ButtonState &getButtonC() { return ButtonC; }
+
+#ifdef USE_M5_DIAL
+    class DialEncoder
+    {
+    public:
+        static DialEncoder &getInstance()
+        {
+            static DialEncoder instance;
+            return instance;
+        }
+
+        int32_t read() const { return M5Dial.Encoder.read(); }
+
+        void write(int32_t value) { M5Dial.Encoder.write(value); }
+
+        int32_t readAndReset()
+        {
+            m_previous = 0;
+            return M5Dial.Encoder.readAndReset();
+        }
+
+        std::optional<int32_t> getDelta()
+        {
+            const int32_t current = read();
+            const int32_t delta = current - m_previous;
+            m_previous = current;
+            return delta;
+        }
+
+        void reset() { readAndReset(); }
+
+    private:
+        DialEncoder() = default;
+        int32_t m_previous = 0;
+    };
+
+    inline DialEncoder &getDialEncoder() { return DialEncoder::getInstance(); }
+#endif
 
     class IMU
     {
@@ -190,7 +237,11 @@ namespace Input
 
         void update()
         {
-            M5.update();  // M5の状態を更新
+#ifdef USE_M5_DIAL
+            M5Dial.update();
+#else
+            M5.update();
+#endif
             M5.Imu.update();
             Touch.update();
         }

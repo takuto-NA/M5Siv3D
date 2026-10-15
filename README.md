@@ -11,7 +11,7 @@ OpenSiv3D-style drawing and input for M5Stack, built on M5Unified.
 - Vector mathematics support
 - Color manipulation with RGB and HSV
 - Text rendering with multiple fonts
-- Input handling for buttons
+- Input handling for buttons and, on M5Dial, the rotary encoder
 - IMU support
 - Compatible with all M5Stack devices
 

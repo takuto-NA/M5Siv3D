@@ -4,6 +4,10 @@
 #include "Color.h"
 #include "Input.h"
 
+#ifdef USE_M5_DIAL
+#include <M5Dial.h>
+#endif
+
 class System
 {
 public:
@@ -18,7 +22,12 @@ public:
     void init()
     {
         auto cfg = M5.config();
+#ifdef USE_M5_DIAL
+        // Encoder on, RFID off. M5Dial::begin calls M5.begin internally.
+        M5Dial.begin(cfg, true, false);
+#else
         M5.begin(cfg);
+#endif
 
         // キャンバスを画面のサイズで初期化
         canvas.createSprite(M5.Display.width(), M5.Display.height());
